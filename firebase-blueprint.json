@@ -1,0 +1,296 @@
+{
+  "entities": {
+    "Boutique": {
+      "title": "Boutique",
+      "description": "Boutique tenant profile in ModaFlow SaaS",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "name": { "type": "string", "maxLength": 120 },
+        "city": { "type": "string", "maxLength": 100 },
+        "country": { "type": "string", "maxLength": 100 },
+        "phone": { "type": "string", "maxLength": 50 },
+        "currency": { "type": "string", "maxLength": 20 },
+        "planId": { "type": "string", "enum": ["starter", "pro", "enterprise"] },
+        "subscriptionStatus": { "type": "string", "enum": ["actif", "essai_gratuit", "expire"] },
+        "subscriptionExpiresAt": { "type": "string", "maxLength": 50 },
+        "daysRemaining": { "type": "number" },
+        "autoRenew": { "type": "boolean" },
+        "createdAt": { "type": "string", "maxLength": 50 },
+        "ownerId": { "type": "string", "maxLength": 128 }
+      },
+      "required": ["id", "name", "planId", "subscriptionStatus"]
+    },
+    "ClothingItem": {
+      "title": "ClothingItem",
+      "description": "Inventory clothing article with size, price and stock tracking",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "sku": { "type": "string", "maxLength": 64 },
+        "name": { "type": "string", "maxLength": 150 },
+        "category": { "type": "string", "maxLength": 50 },
+        "price": { "type": "number" },
+        "costPrice": { "type": "number" },
+        "stock": { "type": "number" },
+        "minStockAlert": { "type": "number" },
+        "sizes": { "type": "array" },
+        "colors": { "type": "array" },
+        "imageUrl": { "type": "string", "maxLength": 500 },
+        "description": { "type": "string", "maxLength": 1000 },
+        "boutiqueId": { "type": "string", "maxLength": 128 }
+      },
+      "required": ["id", "sku", "name", "category", "price", "stock"]
+    },
+    "Order": {
+      "title": "Order",
+      "description": "Order records for store sales and deliveries",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "invoiceNumber": { "type": "string", "maxLength": 64 },
+        "clientName": { "type": "string", "maxLength": 120 },
+        "clientPhone": { "type": "string", "maxLength": 50 },
+        "deliveryAddress": { "type": "string", "maxLength": 300 },
+        "isDelivery": { "type": "boolean" },
+        "deliveryDriverId": { "type": "string", "maxLength": 128 },
+        "deliveryDriverName": { "type": "string", "maxLength": 120 },
+        "items": { "type": "array" },
+        "totalAmount": { "type": "number" },
+        "paymentMethod": { "type": "string", "enum": ["wave", "orange_money", "cash"] },
+        "paymentStatus": { "type": "string", "enum": ["en_attente", "solde"] },
+        "status": { "type": "string", "enum": ["en_cours", "livre_paye", "annule"] },
+        "createdAt": { "type": "string", "maxLength": 50 },
+        "deliveredAt": { "type": "string", "maxLength": 50 },
+        "createdBySellerId": { "type": "string", "maxLength": 128 },
+        "createdBySellerName": { "type": "string", "maxLength": 120 },
+        "notes": { "type": "string", "maxLength": 500 },
+        "isModified": { "type": "boolean" },
+        "returnsHistory": { "type": "array" },
+        "boutiqueId": { "type": "string", "maxLength": 128 }
+      },
+      "required": ["id", "invoiceNumber", "clientName", "totalAmount", "paymentMethod", "status"]
+    },
+    "Client": {
+      "title": "Client",
+      "description": "Customer loyalty and CRM record",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "name": { "type": "string", "maxLength": 120 },
+        "phone": { "type": "string", "maxLength": 50 },
+        "address": { "type": "string", "maxLength": 300 },
+        "totalSpent": { "type": "number" },
+        "ordersCount": { "type": "number" },
+        "loyaltyTier": { "type": "string", "enum": ["vip", "fidele", "nouveau"] },
+        "loyaltyPoints": { "type": "number" },
+        "favoriteCategory": { "type": "string", "maxLength": 50 },
+        "notes": { "type": "string", "maxLength": 500 },
+        "createdAt": { "type": "string", "maxLength": 50 },
+        "lastOrderDate": { "type": "string", "maxLength": 50 },
+        "boutiqueId": { "type": "string", "maxLength": 128 }
+      },
+      "required": ["id", "name", "phone", "totalSpent", "ordersCount", "loyaltyTier"]
+    },
+    "Transaction": {
+      "title": "Transaction",
+      "description": "Financial accounting record for settled sales and refunds",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "orderId": { "type": "string", "maxLength": 128 },
+        "invoiceNumber": { "type": "string", "maxLength": 64 },
+        "amount": { "type": "number" },
+        "paymentMethod": { "type": "string", "enum": ["wave", "orange_money", "cash"] },
+        "clientName": { "type": "string", "maxLength": 120 },
+        "clientPhone": { "type": "string", "maxLength": 50 },
+        "deliveryDriverName": { "type": "string", "maxLength": 120 },
+        "sellerName": { "type": "string", "maxLength": 120 },
+        "timestamp": { "type": "string", "maxLength": 50 },
+        "itemsSummary": { "type": "string", "maxLength": 500 },
+        "type": { "type": "string", "enum": ["vente", "remboursement", "ajustement", "depense"] },
+        "expenseCategory": { "type": "string", "maxLength": 100 },
+        "boutiqueId": { "type": "string", "maxLength": 128 }
+      },
+      "required": ["id", "amount", "paymentMethod", "timestamp"]
+    },
+    "AuditLog": {
+      "title": "AuditLog",
+      "description": "System trace log for security, role actions, and stock changes",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "timestamp": { "type": "string", "maxLength": 50 },
+        "actorName": { "type": "string", "maxLength": 120 },
+        "role": { "type": "string", "enum": ["owner", "admin", "manager", "cashier", "seller", "stock_manager", "delivery", "accountant", "platform_admin"] },
+        "action": { "type": "string", "maxLength": 150 },
+        "details": { "type": "string", "maxLength": 800 },
+        "boutiqueId": { "type": "string", "maxLength": 128 }
+      },
+      "required": ["id", "timestamp", "actorName", "role", "action"]
+    },
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Authenticated user profile and role assignment",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "email": { "type": "string", "maxLength": 150 },
+        "displayName": { "type": "string", "maxLength": 120 },
+        "role": { "type": "string", "enum": ["superadmin", "owner", "admin", "manager", "cashier", "seller", "stock_manager", "delivery", "accountant", "platform_admin"] },
+        "status": { "type": "string", "enum": ["active", "suspended"] },
+        "customPermissions": { "type": "array" },
+        "boutiqueId": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["id", "email", "role"]
+    },
+    "PlatformSettings": {
+      "title": "PlatformSettings",
+      "description": "Global SaaS platform configuration and maintenance mode",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "platformName": { "type": "string", "maxLength": 150 },
+        "supportEmail": { "type": "string", "maxLength": 150 },
+        "supportPhone": { "type": "string", "maxLength": 50 },
+        "defaultCurrency": { "type": "string", "enum": ["FCFA", "EUR", "USD"] },
+        "maintenanceMode": { "type": "boolean" },
+        "maintenanceMessage": { "type": "string", "maxLength": 500 },
+        "publicRegistrationOpen": { "type": "boolean" },
+        "freeTrialDays": { "type": "number" },
+        "updatedAt": { "type": "string", "maxLength": 50 },
+        "updatedBy": { "type": "string", "maxLength": 120 }
+      },
+      "required": ["id", "platformName", "defaultCurrency", "maintenanceMode"]
+    },
+    "PlatformPlan": {
+      "title": "PlatformPlan",
+      "description": "Commercial pricing plans and usage quotas",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "name": { "type": "string", "maxLength": 120 },
+        "priceMonthly": { "type": "number" },
+        "priceYearly": { "type": "number" },
+        "description": { "type": "string", "maxLength": 500 },
+        "features": { "type": "array" },
+        "maxOrdersPerMonth": { "type": "number" },
+        "maxStaff": { "type": "number" },
+        "maxDrivers": { "type": "number" },
+        "maxProducts": { "type": "number" },
+        "maxBoutiques": { "type": "number" },
+        "isActive": { "type": "boolean" }
+      },
+      "required": ["id", "name", "priceMonthly", "isActive"]
+    },
+    "PlatformPayment": {
+      "title": "PlatformPayment",
+      "description": "Platform subscription payments and transaction receipts",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "transactionRef": { "type": "string", "maxLength": 100 },
+        "boutiqueId": { "type": "string", "maxLength": 128 },
+        "boutiqueName": { "type": "string", "maxLength": 150 },
+        "payerName": { "type": "string", "maxLength": 120 },
+        "payerEmail": { "type": "string", "maxLength": 150 },
+        "amount": { "type": "number" },
+        "currency": { "type": "string", "maxLength": 20 },
+        "paymentDate": { "type": "string", "maxLength": 50 },
+        "paymentMethod": { "type": "string", "enum": ["wave", "orange_money", "card", "bank_transfer", "cash"] },
+        "status": { "type": "string", "enum": ["confirme", "en_attente", "echoue", "rembourse"] },
+        "planId": { "type": "string", "maxLength": 50 },
+        "period": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["id", "transactionRef", "amount", "status", "paymentDate"]
+    },
+    "SupportTicket": {
+      "title": "SupportTicket",
+      "description": "Customer support requests and resolutions",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "ticketNumber": { "type": "string", "maxLength": 50 },
+        "boutiqueId": { "type": "string", "maxLength": 128 },
+        "boutiqueName": { "type": "string", "maxLength": 150 },
+        "requesterName": { "type": "string", "maxLength": 120 },
+        "requesterEmail": { "type": "string", "maxLength": 150 },
+        "subject": { "type": "string", "maxLength": 200 },
+        "description": { "type": "string", "maxLength": 2000 },
+        "priority": { "type": "string", "enum": ["urgente", "haute", "normale", "basse"] },
+        "status": { "type": "string", "enum": ["nouveau", "en_cours", "resolu", "ferme"] },
+        "createdAt": { "type": "string", "maxLength": 50 },
+        "replies": { "type": "array" }
+      },
+      "required": ["id", "ticketNumber", "subject", "status", "priority", "createdAt"]
+    },
+    "PlatformAuditLog": {
+      "title": "PlatformAuditLog",
+      "description": "Immutable platform audit trail for Super Admin actions",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "timestamp": { "type": "string", "maxLength": 50 },
+        "actorId": { "type": "string", "maxLength": 128 },
+        "actorName": { "type": "string", "maxLength": 120 },
+        "actorEmail": { "type": "string", "maxLength": 150 },
+        "action": { "type": "string", "maxLength": 200 },
+        "resource": { "type": "string", "maxLength": 100 },
+        "result": { "type": "string", "enum": ["success", "failure"] },
+        "details": { "type": "string", "maxLength": 1000 }
+      },
+      "required": ["id", "timestamp", "actorName", "action", "result"]
+    }
+  },
+  "firestore": {
+    "/boutiques/{boutiqueId}": {
+      "schema": { "$ref": "#/entities/Boutique" },
+      "description": "Boutique tenant account configurations and subscriptions"
+    },
+    "/clothes/{clothId}": {
+      "schema": { "$ref": "#/entities/ClothingItem" },
+      "description": "Articles, models, sizes and inventory catalog"
+    },
+    "/orders/{orderId}": {
+      "schema": { "$ref": "#/entities/Order" },
+      "description": "Client orders, delivery tickets and return histories"
+    },
+    "/clients/{clientId}": {
+      "schema": { "$ref": "#/entities/Client" },
+      "description": "Client loyalty records and phone directory"
+    },
+    "/transactions/{transactionId}": {
+      "schema": { "$ref": "#/entities/Transaction" },
+      "description": "Financial accounting ledger logs"
+    },
+    "/audit_logs/{logId}": {
+      "schema": { "$ref": "#/entities/AuditLog" },
+      "description": "Security and operational audit history"
+    },
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "Authenticated user roles and boutique associations"
+    },
+    "/platform_settings/{settingId}": {
+      "schema": { "$ref": "#/entities/PlatformSettings" },
+      "description": "Global platform configurations and maintenance flags"
+    },
+    "/platform_plans/{planId}": {
+      "schema": { "$ref": "#/entities/PlatformPlan" },
+      "description": "Commercial pricing plans and quota limits"
+    },
+    "/platform_payments/{paymentId}": {
+      "schema": { "$ref": "#/entities/PlatformPayment" },
+      "description": "Verified subscription payment transactions"
+    },
+    "/support_tickets/{ticketId}": {
+      "schema": { "$ref": "#/entities/SupportTicket" },
+      "description": "Customer support and incident requests"
+    },
+    "/platform_audit_logs/{logId}": {
+      "schema": { "$ref": "#/entities/PlatformAuditLog" },
+      "description": "Immutable Super Admin trace logs"
+    }
+  }
+}

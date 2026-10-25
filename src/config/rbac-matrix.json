@@ -1,0 +1,232 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "name": "ModaFlow SaaS RBAC Configuration Matrix",
+  "version": "1.0.0",
+  "description": "Matrice formelle de configuration du contrôle d'accès basé sur les rôles (RBAC) pour le StoreContext de ModaFlow SaaS. Définit explicitement les autorisations CRUD (read, create, update, delete) et d'analyse financière (reports) pour chaque profil d'employé selon le principe de moindre privilège.",
+  "securityPolicy": {
+    "defaultDeny": true,
+    "preventSelfPrivilegeEscalation": true,
+    "tenantIsolation": "strict_boutique_id",
+    "forbiddenTargetRolesForAdmins": ["owner", "platform_admin"],
+    "ownerOnlyPermissions": ["store.billing", "manage_subscription"]
+  },
+  "roles": {
+    "owner": {
+      "role": "owner",
+      "label": "Propriétaire",
+      "badge": "👑 Propriétaire",
+      "description": "Contrôle souverain et complet de sa boutique, de son équipe et de son abonnement SaaS.",
+      "access": {
+        "read": ["products", "categories", "inventory", "sales", "customers", "suppliers", "expenses", "members", "store", "reports"],
+        "create": ["products", "categories", "inventory", "sales", "customers", "suppliers", "expenses", "members", "store"],
+        "update": ["products", "categories", "inventory", "sales", "customers", "suppliers", "expenses", "members", "store"],
+        "delete": ["products", "categories", "inventory", "sales", "customers", "suppliers", "expenses", "members"],
+        "reports": ["operational", "financial", "export"]
+      },
+      "modules": {
+        "products": { "read": true, "create": true, "update": true, "delete": true },
+        "categories": { "read": true, "create": true, "update": true, "delete": true },
+        "inventory": { "read": true, "create": true, "update": true, "delete": true },
+        "sales": { "read": true, "create": true, "update": true, "delete": true },
+        "customers": { "read": true, "create": true, "update": true, "delete": true },
+        "suppliers": { "read": true, "create": true, "update": true, "delete": true },
+        "expenses": { "read": true, "create": true, "update": true, "delete": true },
+        "members": { "read": true, "create": true, "update": true, "delete": true },
+        "store": { "read": true, "create": true, "update": true, "delete": false }
+      },
+      "reports": {
+        "operational": true,
+        "financial": true,
+        "export": true
+      },
+      "constraints": [
+        "Isolation stricte : ne peut pas modifier les données d'une autre boutique sans autorisation explicite."
+      ]
+    },
+
+    "admin": {
+      "role": "admin",
+      "label": "Administrateur de Boutique",
+      "badge": "🛡️ Admin Boutique",
+      "description": "Gestion opérationnelle globale, équipe, catalogue et ventes dans la limite des prérogatives déléguées.",
+      "access": {
+        "read": ["products", "categories", "inventory", "sales", "customers", "suppliers", "expenses", "members", "store", "reports"],
+        "create": ["products", "categories", "inventory", "sales", "customers", "suppliers", "expenses", "members"],
+        "update": ["products", "categories", "inventory", "sales", "customers", "suppliers", "expenses", "members", "store"],
+        "delete": ["products", "categories", "inventory", "customers", "suppliers", "expenses", "members"],
+        "reports": ["operational", "financial", "export"]
+      },
+      "modules": {
+        "products": { "read": true, "create": true, "update": true, "delete": true },
+        "categories": { "read": true, "create": true, "update": true, "delete": true },
+        "inventory": { "read": true, "create": true, "update": true, "delete": true },
+        "sales": { "read": true, "create": true, "update": true, "delete": false },
+        "customers": { "read": true, "create": true, "update": true, "delete": true },
+        "suppliers": { "read": true, "create": true, "update": true, "delete": true },
+        "expenses": { "read": true, "create": true, "update": true, "delete": true },
+        "members": { "read": true, "create": true, "update": true, "delete": true },
+        "store": { "read": true, "create": false, "update": true, "delete": false }
+      },
+      "reports": {
+        "operational": true,
+        "financial": true,
+        "export": true
+      },
+      "constraints": [
+        "Ne peut pas transférer la propriété de la boutique.",
+        "Ne peut pas supprimer, désactiver ou rétrograder le propriétaire.",
+        "Ne peut pas s'attribuer ni attribuer le rôle owner ou platform_admin.",
+        "Ne peut pas modifier l'abonnement SaaS (store.billing).",
+        "Ne peut pas modifier les paramètres sensibles réservés au propriétaire."
+      ]
+    },
+
+    "manager": {
+      "role": "manager",
+      "label": "Gérant",
+      "badge": "💼 Gérant",
+      "description": "Coordination quotidienne de la boutique, ventes courantes, approvisionnements et relation client.",
+      "access": {
+        "read": ["products", "categories", "inventory", "sales", "customers", "suppliers", "members", "reports"],
+        "create": ["products", "categories", "inventory", "sales", "customers"],
+        "update": ["products", "categories", "inventory", "sales", "customers"],
+        "delete": [],
+        "reports": ["operational"]
+      },
+      "modules": {
+        "products": { "read": true, "create": true, "update": true, "delete": false },
+        "categories": { "read": true, "create": true, "update": true, "delete": false },
+        "inventory": { "read": true, "create": true, "update": true, "delete": false },
+        "sales": { "read": true, "create": true, "update": true, "delete": false },
+        "customers": { "read": true, "create": true, "update": true, "delete": false },
+        "suppliers": { "read": true, "create": false, "update": false, "delete": false },
+        "expenses": { "read": false, "create": false, "update": false, "delete": false },
+        "members": { "read": true, "create": false, "update": false, "delete": false },
+        "store": { "read": false, "create": false, "update": false, "delete": false }
+      },
+      "reports": {
+        "operational": true,
+        "financial": false,
+        "export": false
+      },
+      "constraints": [
+        "Ne peut pas supprimer de produits ou catégories.",
+        "Ne peut pas rembourser de vente par défaut sans permission explicite (sales.refund).",
+        "Ne peut pas modifier les rôles de l'équipe ni inviter des membres par défaut.",
+        "Ne peut pas modifier les paramètres de sécurité ou l'abonnement.",
+        "Ne peut pas consulter les bilans financiers confidentiels sans attribution explicite."
+      ]
+    },
+
+    "cashier": {
+      "role": "cashier",
+      "label": "Caissier",
+      "badge": "💳 Caissier POS",
+      "description": "Opérations de caisse au comptoir, encaissements immédiats (Wave, OM, Cash) et édition des tickets.",
+      "access": {
+        "read": ["products", "categories", "sales", "customers"],
+        "create": ["sales", "customers"],
+        "update": [],
+        "delete": [],
+        "reports": []
+      },
+      "modules": {
+        "products": { "read": true, "create": false, "update": false, "delete": false },
+        "categories": { "read": true, "create": false, "update": false, "delete": false },
+        "inventory": { "read": false, "create": false, "update": false, "delete": false },
+        "sales": { "read": true, "create": true, "update": false, "delete": false },
+        "customers": { "read": true, "create": true, "update": false, "delete": false },
+        "suppliers": { "read": false, "create": false, "update": false, "delete": false },
+        "expenses": { "read": false, "create": false, "update": false, "delete": false },
+        "members": { "read": false, "create": false, "update": false, "delete": false },
+        "store": { "read": false, "create": false, "update": false, "delete": false }
+      },
+      "reports": {
+        "operational": false,
+        "financial": false,
+        "export": false
+      },
+      "constraints": [
+        "Interdiction formelle de créer, modifier ou supprimer des produits ou des catégories.",
+        "Interdiction de modifier les prix de vente ou les remises non autorisées.",
+        "Interdiction d'ajuster manuellement les quantités de stock.",
+        "Interdiction d'enregistrer des dépenses.",
+        "Interdiction de consulter les bénéfices nets, marges commerciales et bilans financiers.",
+        "Annulations et remboursements strictement interdits par défaut (nécessitent sales.cancel / sales.refund)."
+      ]
+    },
+
+    "stock_manager": {
+      "role": "stock_manager",
+      "label": "Gestionnaire de Stock",
+      "badge": "📦 Gestionnaire Stock",
+      "description": "Entrées et sorties d'entrepôt, réassorts fournisseurs, inventaires physiques et alertes de rupture.",
+      "access": {
+        "read": ["products", "categories", "inventory", "suppliers", "reports"],
+        "create": ["inventory"],
+        "update": ["inventory"],
+        "delete": [],
+        "reports": ["operational"]
+      },
+      "modules": {
+        "products": { "read": true, "create": false, "update": false, "delete": false },
+        "categories": { "read": true, "create": false, "update": false, "delete": false },
+        "inventory": { "read": true, "create": true, "update": true, "delete": false },
+        "sales": { "read": false, "create": false, "update": false, "delete": false },
+        "customers": { "read": false, "create": false, "update": false, "delete": false },
+        "suppliers": { "read": true, "create": false, "update": false, "delete": false },
+        "expenses": { "read": false, "create": false, "update": false, "delete": false },
+        "members": { "read": false, "create": false, "update": false, "delete": false },
+        "store": { "read": false, "create": false, "update": false, "delete": false }
+      },
+      "reports": {
+        "operational": true,
+        "financial": false,
+        "export": false
+      },
+      "constraints": [
+        "Création de nouveaux vêtements STRICTEMENT INTERDITE par défaut (peut être débloquée uniquement via permission explicite products.create accordée par le propriétaire).",
+        "Interdiction d'enregistrer des ventes ou d'encaisser en caisse.",
+        "Interdiction de modifier les prix de vente ou de supprimer des produits.",
+        "Interdiction de consulter les bénéfices, prix de revient et marges confidentielles.",
+        "Interdiction d'enregistrer des dépenses ou de modifier les paramètres boutique."
+      ]
+    },
+
+    "accountant": {
+      "role": "accountant",
+      "label": "Comptable",
+      "badge": "📊 Comptable",
+      "description": "Rapprochement bancaire, enregistrement des charges d'exploitation, analyse des marges et exports comptables.",
+      "access": {
+        "read": ["products", "categories", "sales", "expenses", "reports"],
+        "create": ["expenses"],
+        "update": ["expenses"],
+        "delete": [],
+        "reports": ["operational", "financial", "export"]
+      },
+      "modules": {
+        "products": { "read": true, "create": false, "update": false, "delete": false },
+        "categories": { "read": true, "create": false, "update": false, "delete": false },
+        "inventory": { "read": false, "create": false, "update": false, "delete": false },
+        "sales": { "read": true, "create": false, "update": false, "delete": false },
+        "customers": { "read": false, "create": false, "update": false, "delete": false },
+        "suppliers": { "read": false, "create": false, "update": false, "delete": false },
+        "expenses": { "read": true, "create": true, "update": true, "delete": false },
+        "members": { "read": false, "create": false, "update": false, "delete": false },
+        "store": { "read": false, "create": false, "update": false, "delete": false }
+      },
+      "reports": {
+        "operational": true,
+        "financial": true,
+        "export": true
+      },
+      "constraints": [
+        "CAS OBLIGATOIRE : Le comptable ne peut en aucun cas créer, modifier ou supprimer un produit du catalogue, même en forçant une requête ou un formulaire direct.",
+        "Interdiction d'enregistrer, d'annuler ou de rembourser des ventes.",
+        "Interdiction de modifier les stocks physiques ou les prix de vente.",
+        "Interdiction de gérer les employés, rôles ou paramètres de la boutique."
+      ]
+    }
+  }
+}

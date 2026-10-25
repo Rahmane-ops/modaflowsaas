@@ -1,0 +1,8 @@
+{
+  "name": "ModaFlow SaaS - Gestion Mode & Livraisons",
+  "description": "Plateforme SaaS tout-en-un pour boutiques de mode : gestion des stocks, commandes temps réel, suivi livreurs, comptabilité Wave/OM/Cash et facturation instantanée.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

@@ -1,0 +1,402 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Default deny all access
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Health check endpoint for boot verification
+    match /test/connection {
+      allow read: if true;
+    }
+
+    // --- Helper Functions ---
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isSuperAdmin() {
+      return isSignedIn() && (
+        request.auth.token.email == 'abdourahmanebathily1@gmail.com' ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['superadmin', 'platform_admin'])
+      );
+    }
+
+    function isSelf(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    // Safe retrieval of caller user profile document
+    function userProfile() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function callerRole() {
+      return userProfile().role;
+    }
+
+    function callerBoutiqueId() {
+      return userProfile().boutiqueId;
+    }
+
+    function isCallerActive() {
+      return !('status' in userProfile()) || userProfile().status == 'active';
+    }
+
+    function isTenantMember(boutiqueId) {
+      return isSignedIn() && isCallerActive() && (isSuperAdmin() || callerBoutiqueId() == boutiqueId);
+    }
+
+    function hasCallerPermission(perm) {
+      return isSuperAdmin() || 
+        callerRole() == 'owner' || 
+        ('customPermissions' in userProfile() && userProfile().customPermissions.hasAny([perm]));
+    }
+
+    // --- Entity Validators ---
+    function isValidUserProfile(data) {
+      return data.keys().hasAll(['id', 'email', 'role']) &&
+        data.id is string && data.id.size() <= 128 &&
+        data.email is string && data.email.size() <= 150 &&
+        data.role in ['superadmin', 'owner', 'admin', 'manager', 'cashier', 'seller', 'stock_manager', 'delivery', 'accountant', 'platform_admin'] &&
+        (!('boutiqueId' in data) || (data.boutiqueId is string && data.boutiqueId.size() <= 128)) &&
+        (!('displayName' in data) || (data.displayName is string && data.displayName.size() <= 120)) &&
+        (!('status' in data) || data.status in ['active', 'suspended']) &&
+        (!('customPermissions' in data) || (data.customPermissions is list && data.customPermissions.size() <= 50)) &&
+        (!('createdAt' in data) || (data.createdAt is string && data.createdAt.size() <= 50));
+    }
+
+    function isValidBoutique(data) {
+      return data.keys().hasAll(['id', 'name', 'planId', 'subscriptionStatus']) &&
+        data.id is string && data.id.size() <= 128 &&
+        data.name is string && data.name.size() > 0 && data.name.size() <= 120 &&
+        data.planId in ['starter', 'pro', 'enterprise'] &&
+        data.subscriptionStatus in ['actif', 'essai_gratuit', 'expire', 'suspendu'] &&
+        (!('city' in data) || (data.city is string && data.city.size() <= 100)) &&
+        (!('country' in data) || (data.country is string && data.country.size() <= 100)) &&
+        (!('phone' in data) || (data.phone is string && data.phone.size() <= 50)) &&
+        (!('currency' in data) || (data.currency is string && data.currency.size() <= 20)) &&
+        (!('subscriptionExpiresAt' in data) || (data.subscriptionExpiresAt is string && data.subscriptionExpiresAt.size() <= 50)) &&
+        (!('daysRemaining' in data) || data.daysRemaining is number) &&
+        (!('autoRenew' in data) || data.autoRenew is bool) &&
+        (!('createdAt' in data) || (data.createdAt is string && data.createdAt.size() <= 50)) &&
+        (!('ownerId' in data) || (data.ownerId is string && data.ownerId.size() <= 128)) &&
+        (!('ownerName' in data) || (data.ownerName is string && data.ownerName.size() <= 120)) &&
+        (!('ownerEmail' in data) || (data.ownerEmail is string && data.ownerEmail.size() <= 150)) &&
+        (!('suspensionReason' in data) || (data.suspensionReason is string && data.suspensionReason.size() <= 500)) &&
+        (!('suspendedAt' in data) || (data.suspendedAt is string && data.suspendedAt.size() <= 50));
+    }
+
+    function isValidClothingItem(data) {
+      return data.keys().hasAll(['id', 'sku', 'name', 'category', 'price', 'stock']) &&
+        data.id is string && data.id.size() <= 128 &&
+        data.sku is string && data.sku.size() <= 64 &&
+        data.name is string && data.name.size() > 0 && data.name.size() <= 150 &&
+        data.category in ['robes', 'hauts', 'ensembles', 'pantalons', 'combinaisons', 'accessoires'] &&
+        data.price is number && data.price >= 0 &&
+        data.stock is number && data.stock >= 0 &&
+        (!('costPrice' in data) || (data.costPrice is number && data.costPrice >= 0)) &&
+        (!('minStockAlert' in data) || (data.minStockAlert is number && data.minStockAlert >= 0)) &&
+        (!('sizes' in data) || (data.sizes is list && data.sizes.size() <= 20)) &&
+        (!('colors' in data) || (data.colors is list && data.colors.size() <= 20)) &&
+        (!('imageUrl' in data) || (data.imageUrl is string && data.imageUrl.size() <= 500)) &&
+        (!('description' in data) || (data.description is string && data.description.size() <= 1000)) &&
+        (!('boutiqueId' in data) || (data.boutiqueId is string && data.boutiqueId.size() <= 128));
+    }
+
+    function isValidOrder(data) {
+      return data.keys().hasAll(['id', 'invoiceNumber', 'clientName', 'totalAmount', 'paymentMethod', 'status']) &&
+        data.id is string && data.id.size() <= 128 &&
+        data.invoiceNumber is string && data.invoiceNumber.size() <= 64 &&
+        data.clientName is string && data.clientName.size() > 0 && data.clientName.size() <= 120 &&
+        data.totalAmount is number && data.totalAmount >= 0 &&
+        data.paymentMethod in ['wave', 'orange_money', 'cash'] &&
+        data.status in ['en_cours', 'livre_paye', 'annule'] &&
+        (!('paymentStatus' in data) || data.paymentStatus in ['en_attente', 'solde']) &&
+        (!('clientPhone' in data) || (data.clientPhone is string && data.clientPhone.size() <= 50)) &&
+        (!('deliveryAddress' in data) || (data.deliveryAddress is string && data.deliveryAddress.size() <= 300)) &&
+        (!('isDelivery' in data) || data.isDelivery is bool) &&
+        (!('deliveryDriverId' in data) || (data.deliveryDriverId is string && data.deliveryDriverId.size() <= 128)) &&
+        (!('deliveryDriverName' in data) || (data.deliveryDriverName is string && data.deliveryDriverName.size() <= 120)) &&
+        (!('items' in data) || (data.items is list && data.items.size() <= 50)) &&
+        (!('createdAt' in data) || (data.createdAt is string && data.createdAt.size() <= 50)) &&
+        (!('deliveredAt' in data) || (data.deliveredAt is string && data.deliveredAt.size() <= 50)) &&
+        (!('createdBySellerId' in data) || (data.createdBySellerId is string && data.createdBySellerId.size() <= 128)) &&
+        (!('createdBySellerName' in data) || (data.createdBySellerName is string && data.createdBySellerName.size() <= 120)) &&
+        (!('notes' in data) || (data.notes is string && data.notes.size() <= 500)) &&
+        (!('isModified' in data) || data.isModified is bool) &&
+        (!('returnsHistory' in data) || (data.returnsHistory is list && data.returnsHistory.size() <= 50)) &&
+        (!('boutiqueId' in data) || (data.boutiqueId is string && data.boutiqueId.size() <= 128));
+    }
+
+    function isValidClient(data) {
+      return data.keys().hasAll(['id', 'name', 'phone', 'totalSpent', 'ordersCount', 'loyaltyTier']) &&
+        data.id is string && data.id.size() <= 128 &&
+        data.name is string && data.name.size() > 0 && data.name.size() <= 120 &&
+        data.phone is string && data.phone.size() <= 50 &&
+        data.totalSpent is number && data.totalSpent >= 0 &&
+        data.ordersCount is number && data.ordersCount >= 0 &&
+        data.loyaltyTier in ['vip', 'fidele', 'nouveau'] &&
+        (!('address' in data) || (data.address is string && data.address.size() <= 300)) &&
+        (!('loyaltyPoints' in data) || (data.loyaltyPoints is number && data.loyaltyPoints >= 0)) &&
+        (!('favoriteCategory' in data) || (data.favoriteCategory is string && data.favoriteCategory.size() <= 50)) &&
+        (!('notes' in data) || (data.notes is string && data.notes.size() <= 500)) &&
+        (!('createdAt' in data) || (data.createdAt is string && data.createdAt.size() <= 50)) &&
+        (!('lastOrderDate' in data) || (data.lastOrderDate is string && data.lastOrderDate.size() <= 50)) &&
+        (!('boutiqueId' in data) || (data.boutiqueId is string && data.boutiqueId.size() <= 128));
+    }
+
+    function isValidTransaction(data) {
+      return data.keys().hasAll(['id', 'amount', 'paymentMethod', 'timestamp']) &&
+        data.id is string && data.id.size() <= 128 &&
+        data.amount is number &&
+        data.paymentMethod in ['wave', 'orange_money', 'cash'] &&
+        data.timestamp is string && data.timestamp.size() <= 50 &&
+        (!('orderId' in data) || (data.orderId is string && data.orderId.size() <= 128)) &&
+        (!('invoiceNumber' in data) || (data.invoiceNumber is string && data.invoiceNumber.size() <= 64)) &&
+        (!('clientName' in data) || (data.clientName is string && data.clientName.size() <= 120)) &&
+        (!('clientPhone' in data) || (data.clientPhone is string && data.clientPhone.size() <= 50)) &&
+        (!('deliveryDriverName' in data) || (data.deliveryDriverName is string && data.deliveryDriverName.size() <= 120)) &&
+        (!('sellerName' in data) || (data.sellerName is string && data.sellerName.size() <= 120)) &&
+        (!('itemsSummary' in data) || (data.itemsSummary is string && data.itemsSummary.size() <= 500)) &&
+        (!('type' in data) || data.type in ['vente', 'remboursement', 'ajustement', 'depense']) &&
+        (!('expenseCategory' in data) || (data.expenseCategory is string && data.expenseCategory.size() <= 100)) &&
+        (!('boutiqueId' in data) || (data.boutiqueId is string && data.boutiqueId.size() <= 128));
+    }
+
+    function isValidAuditLog(data) {
+      return data.keys().hasAll(['id', 'timestamp', 'actorName', 'role', 'action']) &&
+        data.id is string && data.id.size() <= 128 &&
+        data.timestamp is string && data.timestamp.size() <= 50 &&
+        data.actorName is string && data.actorName.size() <= 120 &&
+        data.role in ['owner', 'admin', 'manager', 'cashier', 'seller', 'stock_manager', 'delivery', 'accountant', 'platform_admin'] &&
+        data.action is string && data.action.size() <= 150 &&
+        (!('details' in data) || (data.details is string && data.details.size() <= 800)) &&
+        (!('boutiqueId' in data) || (data.boutiqueId is string && data.boutiqueId.size() <= 128));
+    }
+
+    // --- Collections & Granular RBAC ---
+
+    // User Profiles
+    match /users/{userId} {
+      allow get: if isSignedIn();
+      allow list: if isSignedIn();
+
+      // User registration: either self registration or owner/admin creating employee profile
+      allow create: if isSignedIn() && isValidUserProfile(incoming()) && (
+        isSuperAdmin() ||
+        (isSelf(userId) && incoming().role in ['owner', 'cashier', 'seller', 'stock_manager', 'accountant', 'manager']) ||
+        (isCallerActive() && callerRole() in ['owner', 'admin'] && incoming().boutiqueId == callerBoutiqueId() && incoming().role != 'owner' && incoming().role != 'platform_admin')
+      );
+
+      // Self-update: name/displayName only, CANNOT change role, boutiqueId or permissions!
+      // Manager/Admin update: can only update non-owner members of the same boutique, cannot elevate to owner or platform_admin
+      allow update: if isSignedIn() && isValidUserProfile(incoming()) && (
+        isSuperAdmin() ||
+        (
+          isSelf(userId) && 
+          incoming().role == existing().role && 
+          incoming().boutiqueId == existing().boutiqueId &&
+          (!('status' in incoming()) || incoming().status == existing().status) &&
+          (!('customPermissions' in incoming()) || incoming().customPermissions == existing().customPermissions)
+        ) ||
+        (
+          isCallerActive() && 
+          callerRole() in ['owner', 'admin'] && 
+          existing().boutiqueId == callerBoutiqueId() &&
+          incoming().boutiqueId == callerBoutiqueId() &&
+          existing().role != 'owner' &&
+          incoming().role != 'owner' &&
+          incoming().role != 'platform_admin'
+        )
+      );
+
+      allow delete: if isSuperAdmin();
+    }
+
+    // Boutiques (Tenants)
+    match /boutiques/{boutiqueId} {
+      allow get: if isSignedIn();
+      allow list: if isSignedIn();
+      allow create: if isSignedIn() && isValidId(boutiqueId) && isValidBoutique(incoming());
+      
+      // Only the boutique owner or super admin can modify boutique profile and subscription settings
+      allow update: if (isSuperAdmin() || (isCallerActive() && callerRole() == 'owner' && callerBoutiqueId() == boutiqueId)) &&
+        isValidId(boutiqueId) && isValidBoutique(incoming());
+      allow delete: if isSuperAdmin();
+    }
+
+    // Clothes Catalog
+    match /clothes/{clothId} {
+      allow get, list: if isSignedIn() && isCallerActive();
+
+      // CREATE: strictly forbidden for accountant and cashier. Allowed for owner/admin/manager with products.create
+      allow create: if isSignedIn() && isCallerActive() && isValidId(clothId) && isValidClothingItem(incoming()) &&
+        (isSuperAdmin() || incoming().boutiqueId == callerBoutiqueId()) &&
+        callerRole() != 'accountant' &&
+        callerRole() != 'cashier' &&
+        (
+          callerRole() in ['owner', 'admin'] ||
+          hasCallerPermission('products.create')
+        );
+
+      // UPDATE: accountant and cashier cannot update products. Stock manager can only adjust stock.
+      allow update: if isSignedIn() && isCallerActive() && isValidId(clothId) && isValidClothingItem(incoming()) &&
+        (isSuperAdmin() || (existing().boutiqueId == callerBoutiqueId() && incoming().boutiqueId == callerBoutiqueId())) &&
+        callerRole() != 'accountant' &&
+        callerRole() != 'cashier' &&
+        (
+          callerRole() in ['owner', 'admin'] ||
+          hasCallerPermission('products.update') ||
+          (
+            callerRole() == 'stock_manager' &&
+            incoming().price == existing().price &&
+            incoming().costPrice == existing().costPrice &&
+            incoming().name == existing().name &&
+            incoming().category == existing().category
+          )
+        );
+
+      // DELETE: owner or admin only
+      allow delete: if isSignedIn() && isCallerActive() && isValidId(clothId) &&
+        (isSuperAdmin() || (existing().boutiqueId == callerBoutiqueId() && callerRole() in ['owner', 'admin']));
+    }
+
+    // Orders
+    match /orders/{orderId} {
+      // Cashier can read orders; accountant and manager can read; tenant isolation enforced
+      allow get, list: if isSignedIn() && isCallerActive();
+
+      // CREATE: Cashier, seller, manager, admin, owner. STRICTLY FORBIDDEN FOR ACCOUNTANT & STOCK_MANAGER
+      allow create: if isSignedIn() && isCallerActive() && isValidId(orderId) && isValidOrder(incoming()) &&
+        (isSuperAdmin() || incoming().boutiqueId == callerBoutiqueId()) &&
+        callerRole() != 'accountant' &&
+        callerRole() != 'stock_manager' &&
+        (
+          callerRole() in ['owner', 'admin', 'manager', 'cashier', 'seller'] ||
+          hasCallerPermission('sales.create')
+        );
+
+      // UPDATE: Deliveries, cancellations and refunds require specific roles
+      allow update: if isSignedIn() && isCallerActive() && isValidId(orderId) && isValidOrder(incoming()) &&
+        (isSuperAdmin() || (existing().boutiqueId == callerBoutiqueId() && incoming().boutiqueId == callerBoutiqueId())) &&
+        (
+          callerRole() in ['owner', 'admin'] ||
+          (incoming().status != 'annule' && callerRole() in ['manager', 'delivery']) ||
+          (incoming().status == 'annule' && hasCallerPermission('sales.cancel')) ||
+          hasCallerPermission('sales.refund')
+        );
+
+      allow delete: if isSuperAdmin();
+    }
+
+    // Clients CRM
+    match /clients/{clientId} {
+      allow get, list: if isSignedIn() && isCallerActive();
+
+      allow create: if isSignedIn() && isCallerActive() && isValidId(clientId) && isValidClient(incoming()) &&
+        (isSuperAdmin() || incoming().boutiqueId == callerBoutiqueId()) &&
+        callerRole() != 'stock_manager' &&
+        callerRole() != 'accountant';
+
+      allow update: if isSignedIn() && isCallerActive() && isValidId(clientId) && isValidClient(incoming()) &&
+        (isSuperAdmin() || (existing().boutiqueId == callerBoutiqueId() && incoming().boutiqueId == callerBoutiqueId())) &&
+        callerRole() != 'stock_manager';
+
+      allow delete: if isSignedIn() && isCallerActive() && isValidId(clientId) &&
+        (isSuperAdmin() || (existing().boutiqueId == callerBoutiqueId() && callerRole() in ['owner', 'admin']));
+    }
+
+    // Financial Transactions Ledger
+    match /transactions/{transactionId} {
+      allow get, list: if isSignedIn() && isCallerActive();
+
+      allow create: if isSignedIn() && isCallerActive() && isValidId(transactionId) && isValidTransaction(incoming()) &&
+        (isSuperAdmin() || incoming().boutiqueId == callerBoutiqueId()) &&
+        (
+          // Expenses: allowed for owner, admin, accountant, forbidden for cashier and stock_manager
+          (incoming().type == 'depense' && callerRole() in ['owner', 'admin', 'accountant']) ||
+          // Sales: allowed for owner, admin, manager, cashier, seller, forbidden for accountant and stock_manager
+          (incoming().type == 'vente' && callerRole() in ['owner', 'admin', 'manager', 'cashier', 'seller']) ||
+          // Refunds: allowed for owner, admin, or with refund permission
+          (incoming().type == 'remboursement' && (callerRole() in ['owner', 'admin'] || hasCallerPermission('sales.refund'))) ||
+          // Adjustments: inventory adjust
+          (incoming().type == 'ajustement' && (callerRole() in ['owner', 'admin', 'stock_manager'] || hasCallerPermission('inventory.adjust')))
+        );
+
+      allow update: if isSignedIn() && isCallerActive() && isValidId(transactionId) && isValidTransaction(incoming()) &&
+        (isSuperAdmin() || (existing().boutiqueId == callerBoutiqueId() && callerRole() in ['owner', 'admin']));
+
+      allow delete: if isSignedIn() && isCallerActive() && isValidId(transactionId) &&
+        (isSuperAdmin() || (existing().boutiqueId == callerBoutiqueId() && callerRole() in ['owner', 'admin']));
+    }
+
+    // Cash Closings (Z de caisse)
+    match /cash_closings/{closingId} {
+      allow get, list: if isSignedIn() && isCallerActive();
+      allow create, update: if isSignedIn() && isCallerActive() && isValidId(closingId) &&
+        (isSuperAdmin() || callerRole() in ['owner', 'admin', 'manager', 'cashier']);
+      allow delete: if isSuperAdmin();
+    }
+
+    // Audit Logs (append-only ledger)
+    match /audit_logs/{logId} {
+      allow get, list: if isSignedIn() && isCallerActive();
+      allow create: if isSignedIn() && isCallerActive() && isValidId(logId) && isValidAuditLog(incoming()) &&
+        (isSuperAdmin() || incoming().boutiqueId == callerBoutiqueId());
+      allow update, delete: if isSuperAdmin();
+    }
+
+    // ==========================================
+    // SUPER ADMIN SAAS PLATFORM COLLECTIONS
+    // ==========================================
+
+    // Platform Settings & Maintenance Mode
+    match /platform_settings/{settingId} {
+      allow get, list: if isSignedIn();
+      allow write: if isSuperAdmin();
+    }
+
+    // Commercial Plans & Quotas
+    match /platform_plans/{planId} {
+      allow get, list: if isSignedIn();
+      allow write: if isSuperAdmin();
+    }
+
+    // SaaS Subscription Payments (Sensitive financial data)
+    match /platform_payments/{paymentId} {
+      allow get, list: if isSuperAdmin() || (isSignedIn() && isCallerActive() && resource.data.boutiqueId == callerBoutiqueId());
+      allow write: if isSuperAdmin();
+    }
+
+    // Support Tickets & Customer Inquiries
+    match /support_tickets/{ticketId} {
+      allow get, list: if isSuperAdmin() || (isSignedIn() && isCallerActive() && resource.data.boutiqueId == callerBoutiqueId());
+      allow create: if isSignedIn() && isCallerActive() && (isSuperAdmin() || incoming().boutiqueId == callerBoutiqueId());
+      allow update: if isSuperAdmin() || (isSignedIn() && isCallerActive() && resource.data.boutiqueId == callerBoutiqueId());
+      allow delete: if isSuperAdmin();
+    }
+
+    // Platform Audit Logs (Immutable trace log for Super Admin actions)
+    match /platform_audit_logs/{logId} {
+      allow get, list: if isSuperAdmin();
+      allow create: if isSignedIn() && (isSuperAdmin() || isCallerActive());
+      allow update, delete: if isSuperAdmin();
+    }
+  }
+}
