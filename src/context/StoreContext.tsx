@@ -189,11 +189,11 @@ interface StoreContextType {
   // Auth modal management
   authModalOpen: boolean;
   setAuthModalOpen: (open: boolean) => void;
-  authModalInitialTab: 'roles' | 'email' | 'phone' | 'register_boutique' | 'boutiques' | 'forgot' | 'join';
-  setAuthModalInitialTab: (tab: 'roles' | 'email' | 'phone' | 'register_boutique' | 'boutiques' | 'forgot' | 'join') => void;
+  authModalInitialTab: 'roles' | 'email' | 'phone' | 'register_boutique' | 'forgot' | 'join';
+  setAuthModalInitialTab: (tab: 'roles' | 'email' | 'phone' | 'register_boutique' | 'forgot' | 'join') => void;
   selectedPlanForRegister: 'starter' | 'pro' | 'enterprise';
   setSelectedPlanForRegister: (plan: 'starter' | 'pro' | 'enterprise') => void;
-  openAuthModalWithPlan: (planId?: 'starter' | 'pro' | 'enterprise', tab?: 'roles' | 'email' | 'phone' | 'register_boutique' | 'boutiques' | 'forgot' | 'join') => void;
+  openAuthModalWithPlan: (planId?: 'starter' | 'pro' | 'enterprise', tab?: 'roles' | 'email' | 'phone' | 'register_boutique' | 'forgot' | 'join') => void;
 
   // Cloud Firestore Sync states
   isSyncing: boolean;
@@ -373,12 +373,12 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   // Auth modal helper state
   const [authModalOpen, setAuthModalOpen] = useState(false);
-  const [authModalInitialTab, setAuthModalInitialTab] = useState<'roles' | 'email' | 'phone' | 'register_boutique' | 'boutiques' | 'forgot' | 'join'>('email');
+  const [authModalInitialTab, setAuthModalInitialTab] = useState<'roles' | 'email' | 'phone' | 'register_boutique' | 'forgot' | 'join'>('email');
   const [selectedPlanForRegister, setSelectedPlanForRegister] = useState<'starter' | 'pro' | 'enterprise'>('pro');
 
   const openAuthModalWithPlan = (
     planId?: 'starter' | 'pro' | 'enterprise',
-    tab: 'roles' | 'email' | 'phone' | 'register_boutique' | 'boutiques' | 'forgot' | 'join' = 'register_boutique'
+    tab: 'roles' | 'email' | 'phone' | 'register_boutique' | 'forgot' | 'join' = 'register_boutique'
   ) => {
     if (planId) setSelectedPlanForRegister(planId);
     setAuthModalInitialTab(tab);
@@ -888,7 +888,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             user: superAdminUser
           };
         } else {
-          return { success: false, message: 'Mot de passe incorrect pour le compte Super Admin.' };
+          return { success: false, message: 'Identifiants invalides ou mot de passe incorrect.' };
         }
       } catch {}
     }
@@ -962,7 +962,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           } else {
             return {
               success: false,
-              message: 'Mot de passe incorrect pour cette boutique. Veuillez vérifier vos identifiants.',
+              message: 'Identifiants invalides ou mot de passe incorrect. Veuillez vérifier vos accès.',
             };
           }
         }
@@ -976,7 +976,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         } else {
           return {
             success: false,
-            message: 'Mot de passe incorrect pour la boutique de démonstration (mot de passe : modaflow123).',
+            message: 'Identifiants invalides ou mot de passe incorrect. Veuillez vérifier vos accès.',
           };
         }
       }

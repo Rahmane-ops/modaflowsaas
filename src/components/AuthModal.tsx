@@ -33,7 +33,7 @@ import { ROLE_LABELS } from '../services/securityService';
 interface AuthModalProps {
   isOpen: boolean;
   onClose: () => void;
-  defaultTab?: 'login' | 'register' | 'forgot' | 'join' | 'boutiques';
+  defaultTab?: 'login' | 'register' | 'forgot' | 'join';
 }
 
 export const AuthModal: React.FC<AuthModalProps> = ({ 
@@ -52,9 +52,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     isSuperAdmin,
     isSuperAdminViewOpen,
     setIsSuperAdminViewOpen,
-    boutiques,
-    currentBoutique,
-    setCurrentBoutique,
     registerUser,
     requestPasswordReset,
     resetPasswordWithToken,
@@ -64,8 +61,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     selectedPlanForRegister,
   } = useStore();
 
-  const [activeTab, setActiveTab] = useState<'login' | 'register' | 'forgot' | 'join' | 'boutiques'>(
-    authModalInitialTab === 'register_boutique' ? 'register' : (defaultTab as any)
+  const [activeTab, setActiveTab] = useState<'login' | 'register' | 'forgot' | 'join'>(
+    authModalInitialTab === 'register_boutique' ? 'register' : (defaultTab || 'login')
   );
 
   // Sync tab with external prop
@@ -144,13 +141,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     setIsLoggingIn(true);
 
     const cleanInputEmail = email.trim().toLowerCase();
-    console.log('⚡ [AuthModal] Tentative de connexion par e-mail:', cleanInputEmail);
-
     const res = await loginWithEmail(email, password, rememberMe);
     setIsLoggingIn(false);
 
     if (res.success) {
-      console.log('⚡ [AuthModal] Succès connexion e-mail:', res);
       setLoginSuccess(res.message);
       setNeedsBoutiquePrompt(null);
 
@@ -160,7 +154,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         (currentUser?.email || '').trim().toLowerCase() === 'abdourahmanebathily1@gmail.com';
 
       if (isSuper) {
-        console.log('⚡ [AuthModal] Rôle SUPERADMIN détecté lors de la connexion e-mail ! Déclenchement de isSuperAdminViewOpen = true');
         setIsSuperAdminViewOpen(true);
       }
 
@@ -180,14 +173,12 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     setIsLoggingIn(true);
     setLoginError('');
     setNeedsBoutiquePrompt(null);
-    console.log('⚡ [AuthModal] Démarrage connexion Google OAuth...');
 
     try {
       const res = await signInWithGoogle();
       setIsLoggingIn(false);
 
       if (res.success) {
-        console.log('⚡ [AuthModal] Succès Google SignIn:', res);
         setLoginSuccess(res.message);
 
         const isSuper =
@@ -196,7 +187,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           (currentUser?.email || '').trim().toLowerCase() === 'abdourahmanebathily1@gmail.com';
 
         if (isSuper) {
-          console.log('⚡ [AuthModal] Rôle SUPERADMIN détecté dans Firestore lors du Google SignIn ! Déclenchement de isSuperAdminViewOpen = true');
           setIsSuperAdminViewOpen(true);
         }
 
@@ -205,7 +195,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           setLoginSuccess('');
         }, 700);
       } else {
-        console.warn('⚡ [AuthModal] Erreur ou boutique manquante pour Google SignIn:', res.message);
         setLoginError(res.message);
         if (res.needsBoutique && res.email) {
           setNeedsBoutiquePrompt({ email: res.email, name: res.name });
@@ -216,7 +205,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       }
     } catch (err: any) {
       setIsLoggingIn(false);
-      console.error('⚡ [AuthModal] Exception Google SignIn:', err);
       setLoginError(err?.message || 'Erreur inattendue lors de la connexion Google.');
     }
   };
@@ -306,8 +294,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               </div>
               <p className="text-xs text-neutral-400">
                 {isLoggedIn
-                  ? `Session active : ${currentUser.name} (${currentUser.title})`
-                  : 'Authentification sécurisée multi-boutiques & contrôle RBAC'}
+                  ? `Connecté : ${currentUser.name}`
+                  : 'Connexion sécurisée à votre espace de gestion ModaFlow'}
               </p>
             </div>
           </div>
@@ -318,33 +306,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             <X className="w-5 h-5" />
           </button>
         </div>
-
-        {/* Super Admin Status Banner if logged in */}
-        {isSuperAdmin && currentUser?.id !== 'user-owner' && currentUser?.role !== 'owner' && (
-          <div className="bg-gradient-to-r from-amber-500/10 via-amber-500/15 to-amber-500/10 border-b border-amber-300 px-6 py-3 flex items-center justify-between gap-3">
-            <div className="flex items-center gap-2.5 min-w-0">
-              <span className="text-xl shrink-0">⚡</span>
-              <div className="min-w-0">
-                <p className="text-xs font-black text-amber-950 truncate">
-                  Compte Super Administrateur SaaS Actif ({currentUser?.email || 'abdourahmanebathily1@gmail.com'})
-                </p>
-                <p className="text-[11px] text-amber-800 truncate">
-                  Accès débloqué aux 8 modules de supervision SaaS globale
-                </p>
-              </div>
-            </div>
-            <button
-              type="button"
-              onClick={() => {
-                setIsSuperAdminViewOpen(true);
-                onClose();
-              }}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-slate-950 text-xs font-bold rounded-xl shadow-xs transition-all cursor-pointer shrink-0"
-            >
-              <span>Console Super Admin (8 modules) ⚡</span>
-            </button>
-          </div>
-        )}
 
         {/* Tab Switcher */}
         <div className="flex border-b border-neutral-200 bg-neutral-50 px-6 gap-1 pt-2 overflow-x-auto">
@@ -392,21 +353,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             }`}
           >
             Rejoindre avec code
-          </button>
-
-          <button
-            onClick={() => {
-              setActiveTab('boutiques');
-              setLoginError('');
-              setNeedsBoutiquePrompt(null);
-            }}
-            className={`px-3.5 py-2.5 text-xs font-bold border-b-2 transition-all whitespace-nowrap ${
-              activeTab === 'boutiques'
-                ? 'border-neutral-950 text-neutral-950 bg-white rounded-t-xl'
-                : 'border-transparent text-neutral-500 hover:text-neutral-900'
-            }`}
-          >
-            Mes Boutiques ({boutiques.length})
           </button>
         </div>
 
@@ -875,69 +821,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 Valider l'invitation & Rejoindre l'équipe
               </button>
             </form>
-          )}
-
-          {/* TAB 6: MULTI-BOUTIQUES */}
-          {activeTab === 'boutiques' && (
-            <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h3 className="text-sm font-bold text-neutral-900">Espaces de travail multi-boutiques</h3>
-                  <p className="text-xs text-neutral-500">
-                    Basculez entre vos différentes succursales sans quitter votre session.
-                  </p>
-                </div>
-                <button
-                  onClick={() => setActiveTab('register')}
-                  className="px-3 py-1.5 bg-neutral-950 text-white text-xs font-bold rounded-xl hover:bg-neutral-800"
-                >
-                  + Nouvelle boutique
-                </button>
-              </div>
-
-              <div className="divide-y divide-neutral-100 border border-neutral-200 rounded-2xl overflow-hidden bg-white">
-                {boutiques.map((btq) => {
-                  const isCurrent = btq.id === currentBoutique.id;
-                  return (
-                    <div
-                      key={btq.id}
-                      className="p-4 flex items-center justify-between hover:bg-neutral-50 transition-colors"
-                    >
-                      <div className="flex items-center gap-3">
-                        <div className={`p-2.5 rounded-xl ${isCurrent ? 'bg-amber-400 text-neutral-950 font-bold' : 'bg-neutral-100 text-neutral-700'}`}>
-                          <Store className="w-5 h-5" />
-                        </div>
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <span className="text-xs font-bold text-neutral-900">{btq.name}</span>
-                            {isCurrent && (
-                              <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
-                                Boutique Active
-                              </span>
-                            )}
-                          </div>
-                          <p className="text-[11px] text-neutral-500 mt-0.5">
-                            {btq.city}, {btq.country} · Plan {btq.planId.toUpperCase()} · Devise {btq.currency}
-                          </p>
-                        </div>
-                      </div>
-
-                      {!isCurrent && (
-                        <button
-                          onClick={() => {
-                            setCurrentBoutique(btq);
-                            onClose();
-                          }}
-                          className="px-3 py-1.5 text-xs bg-neutral-900 text-white hover:bg-neutral-800 rounded-lg font-bold transition-colors"
-                        >
-                          Sélectionner
-                        </button>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
           )}
         </div>
       </div>
