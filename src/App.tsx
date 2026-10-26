@@ -33,6 +33,7 @@ const AppContent: React.FC = () => {
     setActiveInvoiceOrder,
     isLandingPage,
     setIsLandingPage,
+    isLoggedIn,
     authModalOpen,
     setAuthModalOpen,
     openAuthModalWithPlan,
@@ -53,6 +54,22 @@ const AppContent: React.FC = () => {
   const [editingOrder, setEditingOrder] = useState<Order | null>(null);
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
   const [exportInitialTab, setExportInitialTab] = useState<'monthly' | 'sales' | 'accounting'>('monthly');
+
+  // Redirection automatique vers la Landing Page de présentation SaaS :
+  // Si l'utilisateur n'est pas authentifié et n'a pas encore visité/choisi d'accéder à la boutique,
+  // il est redirigé vers la LandingPage de présentation au lieu du tableau de bord boutique.
+  React.useEffect(() => {
+    if (!isFirebaseLoading) {
+      const isAuthenticated = Boolean(firebaseUser) || isLoggedIn;
+      const hasVisited = localStorage.getItem('modaflow_has_visited') === 'true';
+      const showLanding = localStorage.getItem('modaflow_show_landing');
+
+      // Si non connecté et (première visite OU préférence landing page active ou non initialisée)
+      if (!isAuthenticated && (!hasVisited || showLanding === 'true' || showLanding === null)) {
+        setIsLandingPage(true);
+      }
+    }
+  }, [isFirebaseLoading, firebaseUser, isLoggedIn, setIsLandingPage]);
 
   // Niveau 1 Sécurité : Redirection automatique si l'utilisateur accède à un onglet interdit
   React.useEffect(() => {
@@ -112,7 +129,13 @@ const AppContent: React.FC = () => {
       <>
         <LandingPage
           onOpenAuth={(tab, planId) => openAuthModalWithPlan(planId, tab as any)}
-          onEnterDashboard={() => setIsLandingPage(false)}
+          onEnterDashboard={() => {
+            try {
+              localStorage.setItem('modaflow_has_visited', 'true');
+              localStorage.setItem('modaflow_show_landing', 'false');
+            } catch {}
+            setIsLandingPage(false);
+          }}
         />
 
         {/* Modal: Espace Connexion & Profils SaaS */}

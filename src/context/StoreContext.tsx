@@ -311,6 +311,7 @@ const STORAGE_KEYS = {
   CURRENT_BOUTIQUE_ID: 'modaflow_current_boutique_id',
   IS_LANDING: 'modaflow_show_landing',
   LOGGED_IN: 'modaflow_is_logged_in',
+  HAS_VISITED: 'modaflow_has_visited',
 };
 
 // Default fallback Boutique if none exists in Firestore
@@ -331,16 +332,21 @@ const DEFAULT_INITIAL_BOUTIQUE: BoutiqueTenant = {
 };
 
 export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  // Landing page toggle
+  // Landing page toggle - defaults to true for new visitors so the SaaS presentation is shown first
   const [isLandingPage, setIsLandingPageState] = useState<boolean>(() => {
     const saved = localStorage.getItem(STORAGE_KEYS.IS_LANDING);
     if (saved !== null) return saved === 'true';
-    return false;
+    const loggedIn = localStorage.getItem(STORAGE_KEYS.LOGGED_IN) === 'true';
+    if (loggedIn) return false;
+    return true;
   });
 
   const setIsLandingPage = (val: boolean) => {
     setIsLandingPageState(val);
     localStorage.setItem(STORAGE_KEYS.IS_LANDING, String(val));
+    if (!val) {
+      localStorage.setItem(STORAGE_KEYS.HAS_VISITED, 'true');
+    }
   };
 
   // Auth modal helper state
@@ -364,7 +370,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [firebaseUser, setFirebaseUser] = useState<User | null>(null);
   const [isFirebaseLoading, setIsFirebaseLoading] = useState<boolean>(true);
   const [isLoggedIn, setIsLoggedIn] = useState<boolean>(() => {
-    return localStorage.getItem(STORAGE_KEYS.LOGGED_IN) !== 'false';
+    return localStorage.getItem(STORAGE_KEYS.LOGGED_IN) === 'true';
   });
 
   // Current User Profile & Persistence
@@ -592,7 +598,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       } else {
         // If not logged in via Firebase Auth, check local preference
         const storedLogin = localStorage.getItem(STORAGE_KEYS.LOGGED_IN);
-        if (storedLogin === 'false') {
+        if (storedLogin !== 'true') {
           setIsLoggedIn(false);
         }
       }
