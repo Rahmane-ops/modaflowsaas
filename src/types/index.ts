@@ -112,6 +112,7 @@ export interface UserAccount {
   lockedUntil?: number;
   activeSessions?: UserSession[];
   storeIds?: string[];
+  boutiqueId?: string;
   createdAt: string;
 }
 

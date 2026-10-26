@@ -33,7 +33,7 @@ import { ROLE_LABELS } from '../services/securityService';
 interface AuthModalProps {
   isOpen: boolean;
   onClose: () => void;
-  defaultTab?: 'login' | 'register' | 'quick' | 'forgot' | 'join' | 'boutiques';
+  defaultTab?: 'login' | 'register' | 'forgot' | 'join' | 'boutiques';
 }
 
 export const AuthModal: React.FC<AuthModalProps> = ({ 
@@ -64,7 +64,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     selectedPlanForRegister,
   } = useStore();
 
-  const [activeTab, setActiveTab] = useState<'login' | 'register' | 'quick' | 'forgot' | 'join' | 'boutiques'>(
+  const [activeTab, setActiveTab] = useState<'login' | 'register' | 'forgot' | 'join' | 'boutiques'>(
     authModalInitialTab === 'register_boutique' ? 'register' : (defaultTab as any)
   );
 
@@ -72,8 +72,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   useEffect(() => {
     if (authModalInitialTab === 'register_boutique') {
       setActiveTab('register');
-    } else if (authModalInitialTab === 'roles') {
-      setActiveTab('quick');
     } else if (authModalInitialTab === 'forgot') {
       setActiveTab('forgot');
     } else if (authModalInitialTab === 'join') {
@@ -81,14 +79,15 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     }
   }, [authModalInitialTab]);
 
-  // Login form states
-  const [email, setEmail] = useState('aissatou@modaflow.com');
-  const [password, setPassword] = useState('modaflow123');
+  // Login form states (Strictly empty by default so users provide their genuine credentials)
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [rememberMe, setRememberMe] = useState(true);
   const [showPassword, setShowPassword] = useState(false);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [loginError, setLoginError] = useState('');
   const [loginSuccess, setLoginSuccess] = useState('');
+  const [needsBoutiquePrompt, setNeedsBoutiquePrompt] = useState<{ email: string; name?: string } | null>(null);
 
   // Lockout countdown state
   const [countdown, setCountdown] = useState<number>(0);
@@ -141,6 +140,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     e.preventDefault();
     setLoginError('');
     setLoginSuccess('');
+    setNeedsBoutiquePrompt(null);
     setIsLoggingIn(true);
 
     const cleanInputEmail = email.trim().toLowerCase();
@@ -152,6 +152,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     if (res.success) {
       console.log('⚡ [AuthModal] Succès connexion e-mail:', res);
       setLoginSuccess(res.message);
+      setNeedsBoutiquePrompt(null);
 
       const isSuper =
         res.isSuperAdmin ||
@@ -169,12 +170,16 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       }, 700);
     } else {
       setLoginError(res.message);
+      if (res.needsBoutique) {
+        setNeedsBoutiquePrompt({ email: cleanInputEmail });
+      }
     }
   };
 
   const handleGoogleSignIn = async () => {
     setIsLoggingIn(true);
     setLoginError('');
+    setNeedsBoutiquePrompt(null);
     console.log('⚡ [AuthModal] Démarrage connexion Google OAuth...');
 
     try {
@@ -200,8 +205,14 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           setLoginSuccess('');
         }, 700);
       } else {
-        console.warn('⚡ [AuthModal] Erreur retournée par Google SignIn:', res.message);
+        console.warn('⚡ [AuthModal] Erreur ou boutique manquante pour Google SignIn:', res.message);
         setLoginError(res.message);
+        if (res.needsBoutique && res.email) {
+          setNeedsBoutiquePrompt({ email: res.email, name: res.name });
+          setRegEmail(res.email);
+          if (res.name) setRegName(res.name);
+          setActiveTab('register');
+        }
       }
     } catch (err: any) {
       setIsLoggingIn(false);
@@ -275,20 +286,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     }
   };
 
-  // Quick 1-click login for demo (Strictly restricted to boutique team roles; Super-Admin demo prohibited)
-  const handleQuickLogin = (u: UserAccount) => {
-    if (u.role === 'superadmin' || u.role === 'platform_admin' || u.email === 'abdourahmanebathily1@gmail.com') {
-      setLoginError("Accès interdit : Le rôle Super Admin SaaS n'est pas accessible en mode démo. Connexion réservée au propriétaire.");
-      return;
-    }
-    loginUser(u);
-    setLoginSuccess(`Connecté en tant que ${u.name} (${u.title})`);
-    setTimeout(() => {
-      onClose();
-      setLoginSuccess('');
-    }, 600);
-  };
-
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-fadeIn">
       <div className="bg-white rounded-3xl shadow-2xl max-w-2xl w-full max-h-[92vh] flex flex-col overflow-hidden border border-neutral-200">
@@ -350,7 +347,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         {/* Tab Switcher */}
         <div className="flex border-b border-neutral-200 bg-neutral-50 px-6 gap-1 pt-2 overflow-x-auto">
           <button
-            onClick={() => setActiveTab('login')}
+            onClick={() => {
+              setActiveTab('login');
+              setLoginError('');
+              setNeedsBoutiquePrompt(null);
+            }}
             className={`px-3.5 py-2.5 text-xs font-bold border-b-2 transition-all whitespace-nowrap ${
               activeTab === 'login'
                 ? 'border-neutral-950 text-neutral-950 bg-white rounded-t-xl'
@@ -361,7 +362,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           </button>
 
           <button
-            onClick={() => setActiveTab('register')}
+            onClick={() => {
+              setActiveTab('register');
+              setLoginError('');
+              setNeedsBoutiquePrompt(null);
+            }}
             className={`px-3.5 py-2.5 text-xs font-bold border-b-2 transition-all whitespace-nowrap flex items-center gap-1.5 ${
               activeTab === 'register'
                 ? 'border-neutral-950 text-neutral-950 bg-white rounded-t-xl'
@@ -373,19 +378,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           </button>
 
           <button
-            onClick={() => setActiveTab('quick')}
-            className={`px-3.5 py-2.5 text-xs font-bold border-b-2 transition-all whitespace-nowrap flex items-center gap-1.5 ${
-              activeTab === 'quick'
-                ? 'border-neutral-950 text-neutral-950 bg-white rounded-t-xl'
-                : 'border-transparent text-neutral-500 hover:text-neutral-900'
-            }`}
-          >
-            <Shield className="w-3.5 h-3.5 text-indigo-500" />
-            Accès Démo 1-Clic
-          </button>
-
-          <button
-            onClick={() => setActiveTab('join')}
+            onClick={() => {
+              setActiveTab('join');
+              setLoginError('');
+              setNeedsBoutiquePrompt(null);
+            }}
             className={`px-3.5 py-2.5 text-xs font-bold border-b-2 transition-all whitespace-nowrap ${
               activeTab === 'join'
                 ? 'border-neutral-950 text-neutral-950 bg-white rounded-t-xl'
@@ -396,7 +393,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           </button>
 
           <button
-            onClick={() => setActiveTab('boutiques')}
+            onClick={() => {
+              setActiveTab('boutiques');
+              setLoginError('');
+              setNeedsBoutiquePrompt(null);
+            }}
             className={`px-3.5 py-2.5 text-xs font-bold border-b-2 transition-all whitespace-nowrap ${
               activeTab === 'boutiques'
                 ? 'border-neutral-950 text-neutral-950 bg-white rounded-t-xl'
@@ -435,7 +436,35 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               {loginError && (
                 <div className="p-3 bg-rose-50 border border-rose-200 text-rose-800 text-xs rounded-xl flex items-center gap-2">
                   <AlertTriangle className="w-4 h-4 text-rose-600 flex-shrink-0" />
-                  {loginError}
+                  <span>{loginError}</span>
+                </div>
+              )}
+
+              {needsBoutiquePrompt && (
+                <div className="p-3.5 bg-amber-50 border border-amber-200 rounded-xl space-y-2.5">
+                  <div className="flex items-start gap-2.5 text-amber-900 text-xs">
+                    <Store className="w-4 h-4 text-amber-600 mt-0.5 shrink-0" />
+                    <div>
+                      <p className="font-bold">Vous n'avez pas encore créé de boutique</p>
+                      <p className="text-[11px] text-amber-700 mt-0.5">
+                        L'adresse <strong>{needsBoutiquePrompt.email}</strong> n'a pas encore de boutique active enregistrée.
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setRegEmail(needsBoutiquePrompt.email);
+                      if (needsBoutiquePrompt.name) setRegName(needsBoutiquePrompt.name);
+                      setActiveTab('register');
+                      setLoginError('');
+                      setNeedsBoutiquePrompt(null);
+                    }}
+                    className="w-full py-2.5 px-3 bg-amber-500 hover:bg-amber-600 text-white rounded-lg font-bold text-xs flex items-center justify-center gap-2 transition-colors cursor-pointer shadow-xs"
+                  >
+                    <span>Créer ma boutique avec cet e-mail (14j gratuits)</span>
+                    <ArrowRight className="w-3.5 h-3.5" />
+                  </button>
                 </div>
               )}
 
@@ -701,81 +730,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             </form>
           )}
 
-          {/* TAB 3: QUICK 1-CLICK DEMO (Boutique Team Roles only - Super-Admin strictly excluded) */}
-          {activeTab === 'quick' && (
-            <div className="space-y-4">
-              <div className="text-center mb-4">
-                <h3 className="text-lg font-black text-neutral-900">Accès Démo 1-Clic aux Rôles Boutiques</h3>
-                <p className="text-xs text-neutral-500 mt-1">
-                  Connectez-vous en 1 clic pour tester l'interface selon le profil d'équipe choisi :
-                </p>
-                <div className="mt-2.5 inline-flex items-center gap-1.5 px-3 py-1 bg-amber-50 text-amber-900 border border-amber-200 rounded-full text-[11px] font-medium">
-                  <Shield className="w-3.5 h-3.5 text-amber-700 flex-shrink-0" />
-                  <span>Rôles boutique uniquement · L'espace Super Admin SaaS est strictement réservé au propriétaire</span>
-                </div>
-              </div>
-
-              {loginError && (
-                <div className="p-3 bg-rose-50 border border-rose-200 text-rose-800 text-xs rounded-xl flex items-center gap-2">
-                  <AlertTriangle className="w-4 h-4 text-rose-600 flex-shrink-0" />
-                  {loginError}
-                </div>
-              )}
-
-              {loginSuccess && (
-                <div className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs rounded-xl flex items-center gap-2">
-                  <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0" />
-                  {loginSuccess}
-                </div>
-              )}
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {users
-                  .filter((u) => u.role !== 'superadmin' && u.role !== 'platform_admin' && u.email !== 'abdourahmanebathily1@gmail.com')
-                  .map((u) => {
-                  const roleCfg = ROLE_LABELS[u.role] || {
-                    badge: u.role,
-                    description: '',
-                    color: 'bg-neutral-100 text-neutral-800',
-                  };
-                  const isCurrent = currentUser.id === u.id && isLoggedIn;
-
-                  return (
-                    <button
-                      key={u.id}
-                      type="button"
-                      onClick={() => handleQuickLogin(u)}
-                      className={`p-3.5 rounded-2xl border text-left transition-all flex items-start gap-3 cursor-pointer ${
-                        isCurrent
-                          ? 'border-neutral-950 bg-neutral-950 text-white shadow-lg'
-                          : 'border-neutral-200 bg-white hover:border-neutral-300 hover:shadow-sm text-neutral-800'
-                      }`}
-                    >
-                      <span className="text-3xl p-2 bg-neutral-100 rounded-xl flex-shrink-0">
-                        {u.avatar || '👤'}
-                      </span>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-1.5 flex-wrap">
-                          <p className="text-xs font-bold truncate">{u.name}</p>
-                          {isCurrent && (
-                            <span className="text-[10px] bg-amber-400 text-neutral-950 font-bold px-1.5 py-0.2 rounded">
-                              Actif
-                            </span>
-                          )}
-                        </div>
-                        <p className={`text-[11px] font-semibold mt-0.5 ${isCurrent ? 'text-neutral-300' : 'text-neutral-600'}`}>
-                          {roleCfg.badge}
-                        </p>
-                        <p className={`text-[10px] line-clamp-1 mt-1 ${isCurrent ? 'text-neutral-400' : 'text-neutral-400'}`}>
-                          {roleCfg.description}
-                        </p>
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          )}
+          {/* TAB 3: FORGOT PASSWORD */}
 
           {/* TAB 4: FORGOT PASSWORD */}
           {activeTab === 'forgot' && (

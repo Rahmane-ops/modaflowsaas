@@ -86,6 +86,7 @@ import {
   subscribeToBoutiqueCashClosings,
   subscribeToBoutiqueAuditLogs,
   subscribeToUserBoutiques,
+  findBoutiquesByEmailOrId,
   saveBoutiqueToFirestore,
   saveClothingItemToFirestore,
   updateClothingItemInFirestore,
@@ -126,8 +127,29 @@ interface StoreContextType {
   isLoggedIn: boolean;
   firebaseUser: User | null;
   isFirebaseLoading: boolean;
-  signInWithGoogle: () => Promise<{ success: boolean; message: string; isSuperAdmin?: boolean; user?: UserAccount }>;
-  loginWithEmail: (email: string, password: string, rememberMe?: boolean) => Promise<{ success: boolean; message: string; isSuperAdmin?: boolean; user?: UserAccount }>;
+  signInWithGoogle: () => Promise<{
+    success: boolean;
+    message: string;
+    isSuperAdmin?: boolean;
+    user?: UserAccount;
+    needsBoutique?: boolean;
+    email?: string;
+    name?: string;
+    uid?: string;
+  }>;
+  loginWithEmail: (
+    email: string,
+    password: string,
+    rememberMe?: boolean
+  ) => Promise<{
+    success: boolean;
+    message: string;
+    isSuperAdmin?: boolean;
+    user?: UserAccount;
+    needsBoutique?: boolean;
+    needsRegister?: boolean;
+    email?: string;
+  }>;
   loginWithPhonePin: (phone: string, pin: string) => { success: boolean; message: string };
   logoutUser: () => Promise<void>;
   registerUser: (params: {
@@ -504,12 +526,28 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       setFirebaseUser(fbUser);
 
       if (fbUser) {
-        setIsLoggedIn(true);
-        localStorage.setItem(STORAGE_KEYS.LOGGED_IN, 'true');
-
         const userEmail = (fbUser.email || '').trim().toLowerCase();
         const isAuthorizedOwner = userEmail === 'abdourahmanebathily1@gmail.com';
         console.log('⚡ [Auth Listener] Utilisateur Firebase connecté:', userEmail, '| Souverain SuperAdmin?', isAuthorizedOwner);
+
+        // Vérification stricte : Savoir si l'utilisateur a déjà une boutique par son adresse email ou UID
+        const userBoutiques = await findBoutiquesByEmailOrId(userEmail, fbUser.uid);
+        const hasBoutique = isAuthorizedOwner || userBoutiques.length > 0;
+
+        if (hasBoutique) {
+          setIsLoggedIn(true);
+          localStorage.setItem(STORAGE_KEYS.LOGGED_IN, 'true');
+          if (userBoutiques.length > 0) {
+            setBoutiques(userBoutiques);
+            setCurrentBoutiqueState(userBoutiques[0]);
+            localStorage.setItem(STORAGE_KEYS.CURRENT_BOUTIQUE_ID, userBoutiques[0].id);
+          }
+        } else {
+          console.warn('⚡ [Auth Listener] Compte Firebase sans boutique enregistrée pour:', userEmail);
+          setIsLoggedIn(false);
+          localStorage.setItem(STORAGE_KEYS.LOGGED_IN, 'false');
+          setIsLandingPage(true);
+        }
 
         // Check if user profile exists in Firestore
         try {
@@ -687,7 +725,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   // 3. AUTHENTICATION & LOGIN HANDLERS
   // --------------------------------------------------------------------------
 
-  // Sign In with Google (Real Firebase Authentication)
+  // Sign In with Google (Real Firebase Authentication avec vérification de boutique)
   const signInWithGoogle = async () => {
     try {
       console.log('⚡ [Google Auth] Début du flux de connexion Google...');
@@ -697,60 +735,81 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       const isSuperAdminEmail = userEmail === 'abdourahmanebathily1@gmail.com';
       console.log('⚡ [Google Auth] Authentification Google réussie pour:', userEmail, '| Est SuperAdmin Souverain?', isSuperAdminEmail);
 
-      // Check if user has an existing boutique or profile in Firestore
+      // 1. Vérification : Savoir si l'utilisateur possède déjà une boutique par son adresse email ou UID
+      const userBoutiques = await findBoutiquesByEmailOrId(userEmail, user.uid);
+      const hasBoutique = isSuperAdminEmail || userBoutiques.length > 0;
+
+      // Check if user profile exists in Firestore
       let userProfile: UserAccount | null = null;
       try {
         userProfile = await getUserProfileFromFirestore(user.uid);
-        console.log('⚡ [Google Auth] Profil Firestore extrait:', userProfile ? `Rôle="${userProfile.role}"` : 'Aucun document trouvé');
       } catch (fsErr) {
         console.warn('⚡ [Google Auth] Avertissement consultation Firestore:', fsErr);
       }
 
-      if (!userProfile) {
-        userProfile = {
-          id: user.uid,
-          name: user.displayName || userEmail.split('@')[0] || (isSuperAdminEmail ? 'Abdourahmane Bathily' : 'Gérant de Boutique'),
-          email: user.email || '',
-          phone: user.phoneNumber || '+221 77 000 00 00',
-          role: isSuperAdminEmail ? 'superadmin' : 'owner',
-          title: isSuperAdminEmail ? 'Propriétaire & Super Administrateur SaaS' : 'Propriétaire & Administrateur',
-          avatar: isSuperAdminEmail ? '⚡' : '👑',
-          status: 'active',
-          emailVerified: user.emailVerified || true,
-          createdAt: new Date().toISOString().substring(0, 10),
-          activeSessions: [],
+      // Si l'utilisateur n'a pas encore de boutique, ne pas l'autoriser à entrer dans la boutique démo !
+      if (!hasBoutique && !userProfile?.boutiqueId) {
+        console.warn('⚡ [Google Auth] Compte Google sans boutique associée:', userEmail);
+        return {
+          success: false,
+          needsBoutique: true,
+          email: userEmail,
+          name: user.displayName || userEmail.split('@')[0],
+          uid: user.uid,
+          message: `Votre compte Google (${userEmail}) est valide, mais aucune boutique n'y est encore associée. Veuillez créer votre boutique ci-dessous pour démarrer vos 14 jours d'essai gratuit !`,
         };
+      }
+
+      const finalProfile: UserAccount = userProfile || {
+        id: user.uid,
+        name: user.displayName || userEmail.split('@')[0] || (isSuperAdminEmail ? 'Abdourahmane Bathily' : 'Gérant de Boutique'),
+        email: user.email || '',
+        phone: user.phoneNumber || '+221 77 000 00 00',
+        role: isSuperAdminEmail ? 'superadmin' : 'owner',
+        title: isSuperAdminEmail ? 'Propriétaire & Super Administrateur SaaS' : 'Propriétaire & Administrateur',
+        avatar: isSuperAdminEmail ? '⚡' : '👑',
+        status: 'active',
+        emailVerified: user.emailVerified || true,
+        createdAt: new Date().toISOString().substring(0, 10),
+        boutiqueId: userBoutiques[0]?.id,
+        activeSessions: [],
+      };
+
+      if (!userProfile) {
         try {
-          await saveUserProfileToFirestore(userProfile);
-          console.log('⚡ [Google Auth] Nouveau profil enregistré dans Firestore avec rôle:', userProfile.role);
+          await saveUserProfileToFirestore(finalProfile);
         } catch (saveErr) {
           console.warn('⚡ [Google Auth] Note sauvegarde Firestore:', saveErr);
         }
-      } else if (isSuperAdminEmail || userProfile.role === 'superadmin' || userProfile.role === 'platform_admin') {
-        console.log('⚡ [Google Auth] Rôle SUPERADMIN détecté dans Firestore pour:', userEmail);
-        userProfile.role = 'superadmin';
-        userProfile.title = 'Propriétaire & Super Administrateur SaaS';
-        userProfile.avatar = '⚡';
-        userProfile.status = 'active';
+      } else if (isSuperAdminEmail || finalProfile.role === 'superadmin' || finalProfile.role === 'platform_admin') {
+        finalProfile.role = 'superadmin';
+        finalProfile.title = 'Propriétaire & Super Administrateur SaaS';
+        finalProfile.avatar = '⚡';
+        finalProfile.status = 'active';
         try {
-          await saveUserProfileToFirestore(userProfile);
+          await saveUserProfileToFirestore(finalProfile);
         } catch {}
       }
 
-      const isSuper = isSuperAdminEmail || userProfile.role === 'superadmin';
+      const isSuper = isSuperAdminEmail || finalProfile.role === 'superadmin';
       if (isSuper) {
-        console.log('⚡ [Google Auth] Déclenchement automatique de la console Super Admin (isSuperAdminViewOpen = true)');
         setIsSuperAdminViewOpenState(true);
         try {
           localStorage.setItem('modaflow_is_superadmin_view_open', 'true');
         } catch {}
       }
 
-      setCurrentUserState(userProfile);
+      if (userBoutiques.length > 0) {
+        setBoutiques(userBoutiques);
+        setCurrentBoutiqueState(userBoutiques[0]);
+        localStorage.setItem(STORAGE_KEYS.CURRENT_BOUTIQUE_ID, userBoutiques[0].id);
+      }
+
+      setCurrentUserState(finalProfile);
       setIsLoggedIn(true);
       setIsLandingPage(false);
       localStorage.setItem(STORAGE_KEYS.LOGGED_IN, 'true');
-      localStorage.setItem(STORAGE_KEYS.CURRENT_USER_ID, userProfile.id);
+      localStorage.setItem(STORAGE_KEYS.CURRENT_USER_ID, finalProfile.id);
       localStorage.setItem(STORAGE_KEYS.IS_LANDING, 'false');
 
       try {
@@ -763,7 +822,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           ? 'Bienvenue, Maître de Plateforme Abdourahmane Bathily ! Vos 8 modules Super Admin sont ouverts.'
           : `Connexion Google réussie : ${user.displayName || user.email}`,
         isSuperAdmin: isSuper,
-        user: userProfile
+        user: finalProfile
       };
     } catch (error: any) {
       console.error('⚡ [Google Auth Error]:', error);
@@ -784,158 +843,175 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
   };
 
-  // Login via Email & Password (Real Firebase Authentication with resilient offline/fallback vault)
+  // Login via Email & Password avec vérification stricte de boutique associée
   const loginWithEmail = async (email: string, password: string) => {
     const cleanEmail = email.trim().toLowerCase();
     const isSuperAdminEmail = cleanEmail === 'abdourahmanebathily1@gmail.com';
     console.log('⚡ [Email Auth] Tentative de connexion:', cleanEmail, '| SuperAdmin attendu:', isSuperAdminEmail);
 
-    try {
-      const userCred = await signInWithEmailAndPassword(auth, cleanEmail, password);
-      const fbUser = userCred.user;
-      console.log('⚡ [Email Auth] Firebase signInWithEmailAndPassword réussi pour UID:', fbUser.uid);
+    if (!cleanEmail) {
+      return { success: false, message: 'Veuillez saisir votre adresse e-mail.' };
+    }
+    if (!password) {
+      return { success: false, message: 'Veuillez saisir votre mot de passe.' };
+    }
 
-      let userProfile: UserAccount | null = null;
-      try {
-        userProfile = await getUserProfileFromFirestore(fbUser.uid);
-        console.log('⚡ [Email Auth] Profil Firestore récupéré:', userProfile ? `Rôle="${userProfile.role}"` : 'Aucun profil trouvé');
-      } catch (err) {
-        console.warn('⚡ [Email Auth] Avertissement consultation Firestore:', err);
-      }
-
-      if (!userProfile) {
-        userProfile = {
-          id: fbUser.uid,
-          name: fbUser.displayName || cleanEmail.split('@')[0] || (isSuperAdminEmail ? 'Abdourahmane Bathily' : 'Gérant de Boutique'),
-          email: cleanEmail,
-          phone: '+221 77 000 00 00',
-          role: isSuperAdminEmail ? 'superadmin' : 'owner',
-          title: isSuperAdminEmail ? 'Propriétaire & Super Administrateur SaaS' : 'Gérant de Boutique',
-          avatar: isSuperAdminEmail ? '⚡' : '👑',
-          status: 'active',
-          emailVerified: fbUser.emailVerified,
-          createdAt: new Date().toISOString().substring(0, 10),
-        };
-        try {
-          await saveUserProfileToFirestore(userProfile);
-          console.log('⚡ [Email Auth] Nouveau profil Firestore enregistré avec rôle:', userProfile.role);
-        } catch {}
-      } else if (isSuperAdminEmail || userProfile.role === 'superadmin' || userProfile.role === 'platform_admin') {
-        console.log('⚡ [Email Auth] Rôle SUPERADMIN détecté dans Firestore pour:', cleanEmail);
-        userProfile.role = 'superadmin';
-        userProfile.title = 'Propriétaire & Super Administrateur SaaS';
-        userProfile.avatar = '⚡';
-        userProfile.status = 'active';
-        try {
-          await saveUserProfileToFirestore(userProfile);
-        } catch {}
-      }
-
-      const isSuper = isSuperAdminEmail || userProfile.role === 'superadmin';
-      if (isSuper) {
-        console.log('⚡ [Email Auth] Déclenchement automatique de la console Super Admin (isSuperAdminViewOpen = true)');
-        setIsSuperAdminViewOpenState(true);
-        try {
-          localStorage.setItem('modaflow_is_superadmin_view_open', 'true');
-        } catch {}
-      }
-
-      setCurrentUserState(userProfile);
-      setIsLoggedIn(true);
-      setIsLandingPage(false);
-      localStorage.setItem(STORAGE_KEYS.LOGGED_IN, 'true');
-      localStorage.setItem(STORAGE_KEYS.CURRENT_USER_ID, userProfile.id);
-      localStorage.setItem(STORAGE_KEYS.IS_LANDING, 'false');
-
-      try {
-        confetti({ particleCount: 50, spread: 60 });
-      } catch {}
-
-      return {
-        success: true,
-        message: isSuper
-          ? 'Bienvenue sur votre console Super Admin, Abdourahmane Bathily !'
-          : `Bienvenue, ${userProfile.name} !`,
-        isSuperAdmin: isSuper,
-        user: userProfile
-      };
-    } catch (error: any) {
-      console.warn('⚡ [Email Auth] Firebase signInWithEmailAndPassword notice:', error?.code);
-      // 0. Sovereign Super Admin direct authentication
-      if (cleanEmail === 'abdourahmanebathily1@gmail.com') {
-        console.log('⚡ [Email Auth Fallback] Authentification directe Super Admin pour abdourahmanebathily1@gmail.com');
-        try {
-          const creds = JSON.parse(localStorage.getItem('modaflow_registered_credentials') || '{}');
-          const savedCred = creds[cleanEmail];
-          const isMatch = savedCred ? savedCred.password === password : password.length >= 4 || password === 'admin123' || password === 'modaflow123';
-          if (isMatch) {
-            if (!savedCred) {
-              creds[cleanEmail] = { password, userId: 'usr-superadmin-root', name: 'Abdourahmane Bathily' };
-              localStorage.setItem('modaflow_registered_credentials', JSON.stringify(creds));
-            }
-            const superAdminUser: UserAccount = {
-              id: savedCred?.userId || 'usr-superadmin-root',
-              name: 'Abdourahmane Bathily',
-              email: 'abdourahmanebathily1@gmail.com',
-              phone: '+221 77 000 00 00',
-              role: 'superadmin',
-              title: 'Propriétaire & Super Administrateur SaaS',
-              avatar: '⚡',
-              status: 'active',
-              emailVerified: true,
-              createdAt: '2026-01-01',
-              activeSessions: [],
-            };
-            loginUser(superAdminUser);
-            setIsSuperAdminViewOpenState(true);
-            try {
-              localStorage.setItem('modaflow_is_superadmin_view_open', 'true');
-            } catch {}
-            return {
-              success: true,
-              message: 'Bienvenue sur votre console Super Admin, Abdourahmane Bathily !',
-              isSuperAdmin: true,
-              user: superAdminUser
-            };
-          }
-        } catch {}
-      }
-
-      // 1. Check if user is in registered credentials vault (e.g. registered while Firebase Auth email/pass was not yet toggled)
+    // 0. Super Admin souverain
+    if (isSuperAdminEmail) {
       try {
         const creds = JSON.parse(localStorage.getItem('modaflow_registered_credentials') || '{}');
         const savedCred = creds[cleanEmail];
-        if (savedCred && savedCred.password === password) {
-          const existingUser = users.find((u) => u.email.toLowerCase() === cleanEmail) || {
-            id: savedCred.userId || `usr-${cleanEmail.replace(/[^a-zA-Z0-9]/g, '_')}`,
-            name: savedCred.name || cleanEmail.split('@')[0],
-            email: cleanEmail,
+        const isMatch = savedCred ? savedCred.password === password : password === 'admin123' || password === 'modaflow123';
+        if (isMatch) {
+          const superAdminUser: UserAccount = {
+            id: savedCred?.userId || 'usr-superadmin-root',
+            name: 'Abdourahmane Bathily',
+            email: 'abdourahmanebathily1@gmail.com',
             phone: '+221 77 000 00 00',
-            role: 'owner' as const,
-            title: 'Propriétaire & Fondateur',
-            avatar: '👑',
-            status: 'active' as const,
+            role: 'superadmin',
+            title: 'Propriétaire & Super Administrateur SaaS',
+            avatar: '⚡',
+            status: 'active',
             emailVerified: true,
-            createdAt: new Date().toISOString().substring(0, 10),
+            createdAt: '2026-01-01',
             activeSessions: [],
           };
-          loginUser(existingUser);
-          return { success: true, message: `Bienvenue, ${existingUser.name} !` };
+          loginUser(superAdminUser);
+          setIsSuperAdminViewOpenState(true);
+          try {
+            localStorage.setItem('modaflow_is_superadmin_view_open', 'true');
+          } catch {}
+          return {
+            success: true,
+            message: 'Bienvenue sur votre console Super Admin, Abdourahmane Bathily !',
+            isSuperAdmin: true,
+            user: superAdminUser
+          };
+        } else {
+          return { success: false, message: 'Mot de passe incorrect pour le compte Super Admin.' };
+        }
+      } catch {}
+    }
+
+    // 1. Vérification obligatoire : Savoir si l'utilisateur a déjà une boutique par son adresse email
+    const userBoutiques = await findBoutiquesByEmailOrId(cleanEmail);
+    const isSeedOwner = cleanEmail === 'aissatou@modaflow.com';
+    const hasBoutique = userBoutiques.length > 0 || isSeedOwner;
+
+    if (!hasBoutique) {
+      console.warn('⚡ [Email Auth] Aucune boutique associée à cet e-mail:', cleanEmail);
+      return {
+        success: false,
+        needsBoutique: true,
+        email: cleanEmail,
+        message: `Aucune boutique n'est associée à l'adresse e-mail "${cleanEmail}". Vous devez d'abord créer votre boutique (14 jours d'essai gratuit) pour pouvoir vous connecter.`,
+      };
+    }
+
+    // 2. Vérification des identifiants (Mot de passe)
+    let authenticatedUser: UserAccount | null = null;
+    let authMethodSucceeded = false;
+
+    // A. Tentative Firebase Auth
+    try {
+      const userCred = await signInWithEmailAndPassword(auth, cleanEmail, password);
+      const fbUser = userCred.user;
+      let userProfile = await getUserProfileFromFirestore(fbUser.uid);
+      const finalProfile: UserAccount = userProfile || {
+        id: fbUser.uid,
+        name: fbUser.displayName || cleanEmail.split('@')[0],
+        email: cleanEmail,
+        phone: '+221 77 000 00 00',
+        role: 'owner',
+        title: 'Propriétaire & Fondateur',
+        avatar: '👑',
+        status: 'active',
+        emailVerified: fbUser.emailVerified,
+        createdAt: new Date().toISOString().substring(0, 10),
+        boutiqueId: userBoutiques[0]?.id,
+      };
+      if (!userProfile) {
+        try {
+          await saveUserProfileToFirestore(finalProfile);
+        } catch {}
+      }
+      authenticatedUser = finalProfile;
+      authMethodSucceeded = true;
+    } catch (fbErr: any) {
+      // B. Si Firebase échoue (ex: réseau, compte local créé sans mot de passe Firebase), vérifier le coffre local
+      try {
+        const creds = JSON.parse(localStorage.getItem('modaflow_registered_credentials') || '{}');
+        const savedCred = creds[cleanEmail];
+        if (savedCred) {
+          if (savedCred.password === password) {
+            authenticatedUser = users.find((u) => u.email.toLowerCase() === cleanEmail) || {
+              id: savedCred.userId || `usr-${cleanEmail.replace(/[^a-zA-Z0-9]/g, '_')}`,
+              name: savedCred.name || cleanEmail.split('@')[0],
+              email: cleanEmail,
+              phone: '+221 77 000 00 00',
+              role: 'owner' as const,
+              title: 'Propriétaire & Fondateur',
+              avatar: '👑',
+              status: 'active' as const,
+              emailVerified: true,
+              createdAt: new Date().toISOString().substring(0, 10),
+              boutiqueId: userBoutiques[0]?.id,
+              activeSessions: [],
+            };
+            authMethodSucceeded = true;
+          } else {
+            return {
+              success: false,
+              message: 'Mot de passe incorrect pour cette boutique. Veuillez vérifier vos identifiants.',
+            };
+          }
         }
       } catch {}
 
-      // 2. Check if user account is in preloaded list (e.g. initial team members)
-      const localMatch = users.find((u) => u.email.toLowerCase() === cleanEmail);
-      if (localMatch && (password === 'modaflow123' || password === 'admin123' || password.length >= 4)) {
-        loginUser(localMatch);
-        return { success: true, message: `Bienvenue, ${localMatch.name} !` };
+      // C. Compte de démonstration prédéfini (Aïssatou Ba)
+      if (!authMethodSucceeded && isSeedOwner) {
+        if (password === 'modaflow123') {
+          authenticatedUser = INITIAL_USERS[0];
+          authMethodSucceeded = true;
+        } else {
+          return {
+            success: false,
+            message: 'Mot de passe incorrect pour la boutique de démonstration (mot de passe : modaflow123).',
+          };
+        }
       }
+    }
 
+    if (!authMethodSucceeded || !authenticatedUser) {
       return {
         success: false,
-        message: 'Adresse e-mail ou mot de passe incorrect. Vérifiez vos identifiants.',
+        message: 'Identifiants invalides ou mot de passe incorrect. Veuillez vérifier vos accès.',
       };
     }
+
+    // Connecter l'utilisateur à sa boutique
+    if (userBoutiques.length > 0) {
+      setBoutiques(userBoutiques);
+      setCurrentBoutiqueState(userBoutiques[0]);
+      localStorage.setItem(STORAGE_KEYS.CURRENT_BOUTIQUE_ID, userBoutiques[0].id);
+    }
+
+    setCurrentUserState(authenticatedUser);
+    setIsLoggedIn(true);
+    setIsLandingPage(false);
+    localStorage.setItem(STORAGE_KEYS.LOGGED_IN, 'true');
+    localStorage.setItem(STORAGE_KEYS.CURRENT_USER_ID, authenticatedUser.id);
+    localStorage.setItem(STORAGE_KEYS.IS_LANDING, 'false');
+
+    try {
+      confetti({ particleCount: 50, spread: 60 });
+    } catch {}
+
+    return {
+      success: true,
+      message: `Bienvenue, ${authenticatedUser.name} ! Accès validé à votre boutique.`,
+      user: authenticatedUser,
+    };
   };
 
   // Register New User + Create Real Boutique in Cloud Firestore & Local State
@@ -1040,7 +1116,10 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         autoRenew: true,
         createdAt: now.toISOString().substring(0, 10),
         ownerId: userId,
+        ownerName: params.name || cleanEmail.split('@')[0],
+        ownerEmail: cleanEmail,
       };
+      newProfile.boutiqueId = newBoutique.id;
 
       if (fbUser) {
         try {
@@ -1887,6 +1966,8 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       autoRenew: true,
       createdAt: now.toISOString().substring(0, 10),
       ownerId: currentUser.id,
+      ownerName: currentUser.name,
+      ownerEmail: currentUser.email,
     };
 
     setBoutiques((prev) => {

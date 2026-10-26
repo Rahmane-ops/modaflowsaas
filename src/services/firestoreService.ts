@@ -39,16 +39,24 @@ export const subscribeToUserBoutiques = (
   if (!auth.currentUser) {
     return () => {};
   }
+  const cleanEmail = (userEmail || '').trim().toLowerCase();
+  const isSuper = cleanEmail === 'abdourahmanebathily1@gmail.com';
+
   try {
     const boutiquesCol = collection(db, 'boutiques');
-    // Listen to all boutiques
+    // Listen to boutiques
     const unsub = onSnapshot(
       boutiquesCol,
       (snapshot) => {
         const list: BoutiqueTenant[] = [];
         snapshot.forEach((d) => {
           const data = d.data() as BoutiqueTenant;
-          list.push({ ...data, id: d.id });
+          const bOwnerEmail = (data.ownerEmail || '').trim().toLowerCase();
+          const bOwnerId = data.ownerId;
+          // Filter: only include boutiques owned by this user or email (superadmin sees all)
+          if (isSuper || bOwnerId === userId || (cleanEmail && bOwnerEmail === cleanEmail)) {
+            list.push({ ...data, id: d.id });
+          }
         });
         onUpdate(list);
       },
@@ -63,6 +71,78 @@ export const subscribeToUserBoutiques = (
     console.error('Failed to set up boutique subscription:', err);
     return () => {};
   }
+};
+
+/**
+ * Find all boutiques owned by or associated with an email address or user ID
+ */
+export const findBoutiquesByEmailOrId = async (
+  email: string,
+  userId?: string
+): Promise<BoutiqueTenant[]> => {
+  const cleanEmail = email.trim().toLowerCase();
+  const results: BoutiqueTenant[] = [];
+
+  // Check Cloud Firestore if user is authenticated
+  if (auth.currentUser) {
+    try {
+      const boutiquesCol = collection(db, 'boutiques');
+      const snap = await getDocs(boutiquesCol);
+      snap.forEach((d) => {
+        const data = d.data() as BoutiqueTenant;
+        const bOwnerEmail = (data.ownerEmail || '').trim().toLowerCase();
+        const bOwnerId = data.ownerId;
+        if (
+          (bOwnerEmail && bOwnerEmail === cleanEmail) ||
+          (userId && bOwnerId === userId)
+        ) {
+          results.push({ ...data, id: d.id });
+        }
+      });
+    } catch (err) {
+      console.warn('[findBoutiquesByEmailOrId] Notice Firestore scan:', err);
+    }
+  }
+
+  // Also check local storage custom boutiques
+  try {
+    const localRaw = localStorage.getItem('modaflow_custom_boutiques');
+    if (localRaw) {
+      const localBtqs: BoutiqueTenant[] = JSON.parse(localRaw);
+      for (const b of localBtqs) {
+        const bEmail = (b.ownerEmail || '').trim().toLowerCase();
+        if (
+          ((bEmail && bEmail === cleanEmail) || (userId && b.ownerId === userId)) &&
+          !results.some((r) => r.id === b.id)
+        ) {
+          results.push(b);
+        }
+      }
+    }
+  } catch {}
+
+  // Initial seed demo boutique: only for seed user aissatou@modaflow.com
+  if (cleanEmail === 'aissatou@modaflow.com' && !results.some((r) => r.id === 'btq-1')) {
+    results.push({
+      id: 'btq-1',
+      name: 'ModaFlow Atelier & Prêt-à-Porter',
+      city: 'Dakar',
+      country: 'Sénégal',
+      phone: '+221 33 821 44 00',
+      currency: 'FCFA',
+      planId: 'pro',
+      subscriptionStatus: 'actif',
+      subscriptionExpiresAt: '2026-11-16',
+      daysRemaining: 30,
+      autoRenew: true,
+      createdAt: '2026-10-16',
+      ownerEmail: 'aissatou@modaflow.com',
+      ownerId: 'user-owner',
+      ownerName: 'Aïssatou Ba',
+    });
+  }
+
+  return results;
 };
 
 /**
