@@ -292,9 +292,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-5 bg-neutral-950 text-white border-b border-neutral-800">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-400 to-amber-600 flex items-center justify-center text-neutral-950 font-black text-lg">
-              MF
-            </div>
+            <img
+              src="/favicon.png"
+              alt="ModaFlow Logo"
+              className="w-10 h-10 rounded-2xl object-cover shadow-sm shrink-0"
+            />
             <div>
               <div className="flex items-center gap-2">
                 <h2 className="text-base font-black">Espace Connexion & Comptes SaaS</h2>

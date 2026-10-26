@@ -169,9 +169,11 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onOpenAuth, onEnterDas
           
           {/* Logo */}
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-neutral-950 text-white flex items-center justify-center font-serif font-bold text-xl shadow-xs">
-              M
-            </div>
+            <img
+              src="/favicon.png"
+              alt="ModaFlow Logo"
+              className="w-10 h-10 rounded-2xl object-cover shadow-sm hover:scale-105 transition-transform"
+            />
             <div>
               <div className="flex items-center gap-2">
                 <span className="text-xl font-black tracking-tight text-neutral-950 font-sans">
@@ -829,7 +831,8 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onOpenAuth, onEnterDas
       {/* 9. Footer (Pure Clean Light) */}
       <footer className="border-t border-slate-200 py-10 px-4 sm:px-6 text-center text-xs text-slate-500 bg-white">
         <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2.5">
+            <img src="/favicon.png" alt="ModaFlow Logo" className="w-6 h-6 rounded-lg object-cover shadow-xs" />
             <span className="font-extrabold text-slate-900">ModaFlow SaaS</span>
             <span>·</span>
             <span>Logiciel de Caisse & Gestion de Mode</span>

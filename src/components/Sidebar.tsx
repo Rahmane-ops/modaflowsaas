@@ -100,9 +100,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
             onClick={() => handleNavClick('dashboard')}
             className="flex items-center gap-2.5 cursor-pointer group select-none"
           >
-            <div className="w-8 h-8 rounded-lg bg-slate-900 text-white flex items-center justify-center font-serif font-bold text-base shadow-xs group-hover:bg-blue-600 transition-colors">
-              M
-            </div>
+            <img 
+              src="/favicon.png" 
+              alt="ModaFlow Logo" 
+              className="w-8 h-8 rounded-xl object-cover shadow-xs group-hover:scale-105 transition-transform" 
+            />
             <div>
               <div className="flex items-center gap-1.5">
                 <span className="font-bold text-sm tracking-tight text-slate-900">
