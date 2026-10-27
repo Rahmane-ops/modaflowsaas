@@ -18,7 +18,9 @@ import {
   User,
   X,
   ShieldAlert,
-  ArrowUpDown
+  ArrowUpDown,
+  Wrench,
+  ExternalLink
 } from 'lucide-react';
 
 export const SuperAdminBoutiques: React.FC = () => {
@@ -26,6 +28,7 @@ export const SuperAdminBoutiques: React.FC = () => {
     boutiques,
     toggleBoutiqueSuspension,
     updateBoutiqueSubscriptionPlan,
+    enterBoutiqueIntervention,
     platformPlans,
   } = useStore();
 
@@ -241,10 +244,20 @@ export const SuperAdminBoutiques: React.FC = () => {
 
                     <td className="px-4 py-3 text-right">
                       <div className="flex items-center justify-end gap-1.5">
+                        {/* Intervenir dans la boutique (Accès Total) */}
+                        <button
+                          onClick={() => enterBoutiqueIntervention(b)}
+                          className="px-2.5 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-600 active:scale-95 text-white font-bold text-xs flex items-center gap-1.5 shadow-xs transition-all cursor-pointer shrink-0"
+                          title="Prendre la main sur cette boutique pour intervenir en cas de problème"
+                        >
+                          <Wrench className="w-3.5 h-3.5" />
+                          <span className="hidden sm:inline">Intervenir</span>
+                        </button>
+
                         {/* Details Drawer */}
                         <button
                           onClick={() => setSelectedBoutique(b)}
-                          className="p-1.5 rounded-lg border border-slate-200 text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition-colors"
+                          className="p-1.5 rounded-lg border border-slate-200 text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition-colors cursor-pointer"
                           title="Voir la fiche détaillée"
                         >
                           <Eye className="w-3.5 h-3.5" />
@@ -433,6 +446,32 @@ export const SuperAdminBoutiques: React.FC = () => {
             </div>
 
             <div className="py-6 space-y-6 flex-1">
+              {/* ACCÈS TOTAL & INTERVENTION CARD */}
+              <div className="p-4 bg-gradient-to-r from-amber-50 via-amber-100/70 to-amber-50 border border-amber-300 rounded-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-xs">
+                <div className="flex items-start gap-3">
+                  <div className="p-2 bg-amber-500 text-white rounded-xl shadow-xs shrink-0 mt-0.5">
+                    <Wrench className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <p className="font-extrabold text-amber-950 text-xs sm:text-sm">Accès Total & Intervention Super Admin</p>
+                    <p className="text-[11px] text-amber-800 mt-0.5 leading-relaxed">
+                      Prenez la main sur <strong>{selectedBoutique.name}</strong> pour auditer ses stocks, modifier ses commandes, clôturer la caisse ou résoudre un problème.
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    enterBoutiqueIntervention(selectedBoutique);
+                    setSelectedBoutique(null);
+                  }}
+                  className="w-full sm:w-auto px-4 py-2.5 bg-amber-600 hover:bg-amber-700 active:scale-95 text-white font-bold text-xs rounded-xl flex items-center justify-center gap-2 transition-all shadow-xs cursor-pointer shrink-0"
+                >
+                  <span>Prendre le contrôle</span>
+                  <ExternalLink className="w-3.5 h-3.5" />
+                </button>
+              </div>
+
               <div>
                 <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">
                   Informations Générales

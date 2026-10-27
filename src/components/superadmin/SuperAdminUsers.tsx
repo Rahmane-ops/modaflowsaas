@@ -19,7 +19,14 @@ import {
   X,
   Phone,
   UserCheck,
-  ShieldAlert
+  ShieldAlert,
+  Plus,
+  Pencil,
+  Trash2,
+  Lock,
+  Building2,
+  Sparkles,
+  Check
 } from 'lucide-react';
 
 export const SuperAdminUsers: React.FC = () => {
@@ -27,6 +34,9 @@ export const SuperAdminUsers: React.FC = () => {
     users = [],
     toggleUserAccountStatus,
     triggerUserPasswordReset,
+    createSuperAdminUser,
+    updateSuperAdminUser,
+    deleteSuperAdminUser,
     boutiques = [],
     currentUser
   } = useStore();
@@ -40,6 +50,52 @@ export const SuperAdminUsers: React.FC = () => {
   const [confirmToggleUser, setConfirmToggleUser] = useState<UserAccount | null>(null);
   const [resetFeedback, setResetFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
+
+  // CREATE USER STATES
+  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [createForm, setCreateForm] = useState<{
+    name: string;
+    email: string;
+    phone: string;
+    role: UserRole;
+    boutiqueId: string;
+    title: string;
+    password: string;
+  }>({
+    name: '',
+    email: '',
+    phone: '+221 77 ',
+    role: 'manager',
+    boutiqueId: '',
+    title: '',
+    password: '',
+  });
+
+  // EDIT USER STATES
+  const [editingUser, setEditingUser] = useState<UserAccount | null>(null);
+  const [editForm, setEditForm] = useState<{
+    name: string;
+    email: string;
+    phone: string;
+    role: UserRole;
+    boutiqueId: string;
+    title: string;
+    newPassword: string;
+    status: 'active' | 'suspended';
+  }>({
+    name: '',
+    email: '',
+    phone: '',
+    role: 'manager',
+    boutiqueId: '',
+    title: '',
+    newPassword: '',
+    status: 'active',
+  });
+
+  // DELETE USER STATES
+  const [deletingUser, setDeletingUser] = useState<UserAccount | null>(null);
+  const [deleteReason, setDeleteReason] = useState('Suppression administrative ordonnée par Super Admin');
 
   // Safe memoized user filtering (Prevents any TypeError if properties are undefined)
   const filteredUsers = useMemo(() => {
@@ -79,7 +135,32 @@ export const SuperAdminUsers: React.FC = () => {
     return { total, active, suspended, admins };
   }, [users]);
 
-  // Execute Firebase Auth Password Reset without window.confirm
+  // Random Password Generator
+  const generateRandomPassword = () => {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789!@#$%';
+    let pwd = '';
+    for (let i = 0; i < 10; i++) {
+      pwd += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    return pwd;
+  };
+
+  // Open Edit Modal with prefilled values
+  const handleOpenEdit = (user: UserAccount) => {
+    setEditingUser(user);
+    setEditForm({
+      name: user.name || '',
+      email: user.email || '',
+      phone: user.phone || '+221 77 ',
+      role: user.role || 'manager',
+      boutiqueId: user.boutiqueId || (boutiques[0]?.id || ''),
+      title: user.title || '',
+      newPassword: '',
+      status: user.status === 'suspended' ? 'suspended' : 'active',
+    });
+  };
+
+  // Execute Firebase Auth Password Reset
   const handleExecutePasswordReset = async (email: string) => {
     setIsProcessing(true);
     setResetFeedback(null);
@@ -101,7 +182,7 @@ export const SuperAdminUsers: React.FC = () => {
     }
   };
 
-  // Execute Toggle Account Status without window.confirm
+  // Execute Toggle Account Status
   const handleExecuteToggleStatus = async (userToToggle: UserAccount) => {
     setIsProcessing(true);
     setResetFeedback(null);
@@ -121,6 +202,102 @@ export const SuperAdminUsers: React.FC = () => {
     } finally {
       setIsProcessing(false);
       setConfirmToggleUser(null);
+    }
+  };
+
+  // Handle Create User
+  const handleCreateUserSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsProcessing(true);
+    setResetFeedback(null);
+    try {
+      const res = await createSuperAdminUser({
+        name: createForm.name,
+        email: createForm.email,
+        phone: createForm.phone,
+        role: createForm.role,
+        boutiqueId: createForm.boutiqueId || (boutiques[0]?.id || ''),
+        title: createForm.title,
+        password: createForm.password || 'ModaFlow2026!',
+      });
+      if (res.success) {
+        setResetFeedback({ type: 'success', message: res.message });
+        setIsCreateModalOpen(false);
+        setCreateForm({
+          name: '',
+          email: '',
+          phone: '+221 77 ',
+          role: 'manager',
+          boutiqueId: '',
+          title: '',
+          password: '',
+        });
+      } else {
+        setResetFeedback({ type: 'error', message: res.message });
+      }
+    } catch (err: any) {
+      setResetFeedback({ type: 'error', message: err?.message || 'Erreur lors de la création du compte.' });
+    } finally {
+      setIsProcessing(false);
+      setTimeout(() => setResetFeedback(null), 6000);
+    }
+  };
+
+  // Handle Edit User
+  const handleEditUserSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingUser) return;
+    setIsProcessing(true);
+    setResetFeedback(null);
+    try {
+      const res = await updateSuperAdminUser(editingUser.id, {
+        name: editForm.name,
+        email: editForm.email,
+        phone: editForm.phone,
+        role: editForm.role,
+        boutiqueId: editForm.boutiqueId,
+        title: editForm.title,
+        status: editForm.status,
+        newPassword: editForm.newPassword.trim() ? editForm.newPassword.trim() : undefined,
+      });
+      if (res.success) {
+        setResetFeedback({ type: 'success', message: res.message });
+        if (selectedUser?.id === editingUser.id && res.user) {
+          setSelectedUser(res.user);
+        }
+        setEditingUser(null);
+      } else {
+        setResetFeedback({ type: 'error', message: res.message });
+      }
+    } catch (err: any) {
+      setResetFeedback({ type: 'error', message: err?.message || 'Erreur lors de la mise à jour.' });
+    } finally {
+      setIsProcessing(false);
+      setTimeout(() => setResetFeedback(null), 6000);
+    }
+  };
+
+  // Handle Delete User
+  const handleDeleteUserSubmit = async () => {
+    if (!deletingUser) return;
+    setIsProcessing(true);
+    setResetFeedback(null);
+    try {
+      const res = await deleteSuperAdminUser(deletingUser.id, deleteReason);
+      if (res.success) {
+        setResetFeedback({ type: 'success', message: res.message });
+        if (selectedUser?.id === deletingUser.id) {
+          setSelectedUser(null);
+        }
+        setDeletingUser(null);
+      } else {
+        setResetFeedback({ type: 'error', message: res.message });
+      }
+    } catch (err: any) {
+      setResetFeedback({ type: 'error', message: err?.message || 'Erreur lors de la suppression.' });
+    } finally {
+      setIsProcessing(false);
+      setTimeout(() => setResetFeedback(null), 6000);
     }
   };
 
@@ -145,9 +322,29 @@ export const SuperAdminUsers: React.FC = () => {
             Gestion des Utilisateurs Plateforme ({stats.total})
           </h1>
           <p className="text-xs text-slate-500 mt-0.5">
-            Répertoire souverain des marchands, employés et administrateurs. Contrôles de suspension et réinitialisations Firebase Auth.
+            Création, modification, attribution de rôles et suppression sécurisée des comptes de la plateforme.
           </p>
         </div>
+
+        {/* Action Button: Create New User */}
+        <button
+          onClick={() => {
+            setCreateForm({
+              name: '',
+              email: '',
+              phone: '+221 77 ',
+              role: 'manager',
+              boutiqueId: boutiques[0]?.id || '',
+              title: '',
+              password: generateRandomPassword(),
+            });
+            setIsCreateModalOpen(true);
+          }}
+          className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 active:scale-95 text-white font-bold text-xs rounded-xl flex items-center gap-2 shadow-sm transition-all cursor-pointer shrink-0"
+        >
+          <Plus className="w-4 h-4" />
+          <span>Créer un Utilisateur</span>
+        </button>
       </div>
 
       {/* KPI Cards */}
@@ -230,8 +427,10 @@ export const SuperAdminUsers: React.FC = () => {
             <option value="admin">Admin Boutique</option>
             <option value="manager">Gérant</option>
             <option value="cashier">Caissier</option>
+            <option value="tailor">Couturier / Atelier</option>
             <option value="stock_manager">Gestionnaire de Stock</option>
             <option value="accountant">Comptable</option>
+            <option value="delivery">Livreur</option>
           </select>
 
           <select
@@ -254,47 +453,43 @@ export const SuperAdminUsers: React.FC = () => {
               <tr className="bg-slate-50/80 border-b border-slate-200 text-slate-600 font-semibold">
                 <th className="px-4 py-3.5">Utilisateur</th>
                 <th className="px-4 py-3.5">Adresse E-mail</th>
-                <th className="px-4 py-3.5">Rôle Système</th>
+                <th className="px-4 py-3.5">Rôle</th>
+                <th className="px-4 py-3.5">Boutique</th>
                 <th className="px-4 py-3.5">Statut</th>
                 <th className="px-4 py-3.5">Téléphone</th>
-                <th className="px-4 py-3.5">Date Inscription</th>
+                <th className="px-4 py-3.5">Création</th>
                 <th className="px-4 py-3.5 text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {filteredUsers.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-4 py-8 text-center text-slate-500">
-                    Aucun utilisateur trouvé correspondant aux critères.
+                  <td colSpan={8} className="px-4 py-8 text-center text-slate-500">
+                    Aucun utilisateur trouvé correspondant à vos critères de recherche.
                   </td>
                 </tr>
               ) : (
                 filteredUsers.map((u) => {
                   const roleCfg = getRoleConfig(u.role);
-                  const isCurrent = u.id === currentUser?.id;
                   const isSovereign = (u.email || '').trim().toLowerCase() === 'abdourahmanebathily1@gmail.com';
                   const isActive = (u.status || 'active') === 'active';
+                  const assignedBoutique = boutiques.find((b) => b.id === u.boutiqueId);
 
                   return (
                     <tr key={u.id} className="hover:bg-slate-50/60 transition-colors">
                       <td className="px-4 py-3 font-medium text-slate-900">
                         <div className="flex items-center gap-2.5">
-                          <span className="w-7 h-7 rounded-lg bg-slate-100 flex items-center justify-center text-sm shrink-0">
-                            {u.avatar || '👤'}
-                          </span>
-                          <div>
+                          <div className="w-7 h-7 rounded-lg bg-slate-100 flex items-center justify-center text-slate-700 font-bold text-xs shrink-0">
+                            {u.avatar || (isSovereign ? '⚡' : u.role === 'owner' ? '👑' : '👤')}
+                          </div>
+                          <div className="min-w-0">
                             <div className="flex items-center gap-1.5">
-                              <span className="font-bold text-slate-900">
-                                {u.name || (u.email ? u.email.split('@')[0] : 'Utilisateur')}
-                              </span>
-                              {isCurrent && (
-                                <span className="text-[10px] bg-slate-900 text-white px-1.5 py-0.2 rounded font-semibold">
-                                  Vous
-                                </span>
-                              )}
+                              <p className="font-bold text-slate-900 truncate">
+                                {u.name || u.email?.split('@')[0]}
+                              </p>
                               {isSovereign && (
-                                <span className="text-[10px] bg-amber-500 text-slate-950 px-1.5 py-0.2 rounded font-black">
-                                  ⚡ PROPRIÉTAIRE
+                                <span className="text-[9px] px-1 py-0.2 rounded bg-amber-100 text-amber-800 font-bold">
+                                  Fondateur
                                 </span>
                               )}
                             </div>
@@ -311,6 +506,18 @@ export const SuperAdminUsers: React.FC = () => {
                         <span className={`px-2 py-0.5 rounded text-[11px] font-semibold border ${roleCfg.color}`}>
                           {roleCfg.badge}
                         </span>
+                      </td>
+
+                      <td className="px-4 py-3 text-slate-600">
+                        {assignedBoutique ? (
+                          <span className="font-medium text-slate-800 truncate block max-w-[140px]" title={assignedBoutique.name}>
+                            🏢 {assignedBoutique.name}
+                          </span>
+                        ) : isSovereign ? (
+                          <span className="text-amber-700 font-semibold text-[11px]">Toutes (Super Admin)</span>
+                        ) : (
+                          <span className="text-slate-400 italic">Non assignée</span>
+                        )}
                       </td>
 
                       <td className="px-4 py-3">
@@ -346,6 +553,15 @@ export const SuperAdminUsers: React.FC = () => {
                             <Eye className="w-3.5 h-3.5" />
                           </button>
 
+                          {/* Edit User Button */}
+                          <button
+                            onClick={() => handleOpenEdit(u)}
+                            className="p-1.5 rounded-lg border border-blue-200 text-blue-600 hover:bg-blue-50 transition-colors cursor-pointer"
+                            title="Modifier cet utilisateur"
+                          >
+                            <Pencil className="w-3.5 h-3.5" />
+                          </button>
+
                           {/* Firebase Auth Password Reset */}
                           <button
                             onClick={() => setConfirmResetEmail(u.email || null)}
@@ -375,6 +591,20 @@ export const SuperAdminUsers: React.FC = () => {
                               )}
                             </button>
                           )}
+
+                          {/* Delete User Button (Protected for sovereign and active self) */}
+                          {!isSovereign && u.id !== currentUser?.id && (
+                            <button
+                              onClick={() => {
+                                setDeletingUser(u);
+                                setDeleteReason('Suppression administrative ordonnée par Super Admin');
+                              }}
+                              className="p-1.5 rounded-lg border border-rose-200 text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer"
+                              title="Supprimer définitivement cet utilisateur"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -386,6 +616,420 @@ export const SuperAdminUsers: React.FC = () => {
         </div>
       </div>
 
+      {/* ========================================================================= */}
+      {/* MODAL 1: CREATE NEW USER                                                  */}
+      {/* ========================================================================= */}
+      {isCreateModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 animate-in zoom-in-95 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center">
+                  <Plus className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-900">Créer un Nouvel Utilisateur</h3>
+                  <p className="text-xs text-slate-500">Ajout immédiat sur la plateforme ModaFlow & Cloud Firestore</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsCreateModalOpen(false)}
+                className="p-1.5 text-slate-400 hover:text-slate-700 rounded-lg hover:bg-slate-100"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleCreateUserSubmit} className="space-y-4 mt-4">
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  Nom complet & Prénom <span className="text-rose-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="Ex : Ousmane Ba"
+                  value={createForm.name}
+                  onChange={(e) => setCreateForm({ ...createForm, name: e.target.value })}
+                  className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-600 focus:outline-none"
+                />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    Adresse e-mail <span className="text-rose-500">*</span>
+                  </label>
+                  <input
+                    type="email"
+                    required
+                    placeholder="ousmane@boutique.com"
+                    value={createForm.email}
+                    onChange={(e) => setCreateForm({ ...createForm, email: e.target.value })}
+                    className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-600 focus:outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    Téléphone (WhatsApp)
+                  </label>
+                  <input
+                    type="tel"
+                    placeholder="+221 77 123 45 67"
+                    value={createForm.phone}
+                    onChange={(e) => setCreateForm({ ...createForm, phone: e.target.value })}
+                    className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-600 focus:outline-none font-mono"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    Rôle & Privilèges <span className="text-rose-500">*</span>
+                  </label>
+                  <select
+                    value={createForm.role}
+                    onChange={(e) => setCreateForm({ ...createForm, role: e.target.value as UserRole })}
+                    className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-600 focus:outline-none font-semibold text-slate-800"
+                  >
+                    <option value="owner">Propriétaire de Boutique</option>
+                    <option value="manager">Gérant de Boutique</option>
+                    <option value="cashier">Caissier / Vendeur Caisse</option>
+                    <option value="tailor">Couturier / Atelier</option>
+                    <option value="stock_manager">Gestionnaire de Stock</option>
+                    <option value="accountant">Comptable</option>
+                    <option value="delivery">Livreur</option>
+                    <option value="platform_admin">Admin Plateforme</option>
+                    <option value="superadmin">Super Admin (Plein Pouvoir)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    Boutique Assignée <span className="text-rose-500">*</span>
+                  </label>
+                  <select
+                    value={createForm.boutiqueId}
+                    onChange={(e) => setCreateForm({ ...createForm, boutiqueId: e.target.value })}
+                    className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-600 focus:outline-none text-slate-800"
+                  >
+                    {boutiques.map((b) => (
+                      <option key={b.id} value={b.id}>
+                        {b.name} ({b.city})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  Titre / Fonction affichée
+                </label>
+                <input
+                  type="text"
+                  placeholder="Ex : Responsable des ventes & Atelier"
+                  value={createForm.title}
+                  onChange={(e) => setCreateForm({ ...createForm, title: e.target.value })}
+                  className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-600 focus:outline-none"
+                />
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-xs font-semibold text-slate-700">
+                    Mot de passe initial
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setCreateForm({ ...createForm, password: generateRandomPassword() })}
+                    className="text-[11px] font-bold text-blue-600 hover:text-blue-800 flex items-center gap-1 cursor-pointer"
+                  >
+                    <Sparkles className="w-3 h-3" />
+                    <span>Générer automatiquement</span>
+                  </button>
+                </div>
+                <div className="relative">
+                  <Lock className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+                  <input
+                    type="text"
+                    required
+                    placeholder="Mot de passe temporaire"
+                    value={createForm.password}
+                    onChange={(e) => setCreateForm({ ...createForm, password: e.target.value })}
+                    className="w-full pl-9 pr-3 py-2 text-xs border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-600 focus:outline-none font-mono"
+                  />
+                </div>
+                <p className="text-[11px] text-slate-400 mt-1">
+                  L'utilisateur pourra se connecter directement avec cet e-mail et ce mot de passe (+ vérification 2FA).
+                </p>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setIsCreateModalOpen(false)}
+                  disabled={isProcessing}
+                  className="px-4 py-2 border border-slate-200 text-slate-700 rounded-xl text-xs font-semibold hover:bg-slate-50 cursor-pointer"
+                >
+                  Annuler
+                </button>
+                <button
+                  type="submit"
+                  disabled={isProcessing}
+                  className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold shadow-sm transition-all flex items-center gap-2 cursor-pointer disabled:opacity-50"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>{isProcessing ? 'Création en cours...' : 'Créer le Compte'}</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* MODAL 2: EDIT EXISTING USER                                               */}
+      {/* ========================================================================= */}
+      {editingUser && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 animate-in zoom-in-95 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center">
+                  <Pencil className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-900">Modifier l'Utilisateur</h3>
+                  <p className="text-xs text-slate-500 font-mono">{editingUser.id}</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setEditingUser(null)}
+                className="p-1.5 text-slate-400 hover:text-slate-700 rounded-lg hover:bg-slate-100"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleEditUserSubmit} className="space-y-4 mt-4">
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  Nom complet & Prénom
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={editForm.name}
+                  onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
+                  className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-600 focus:outline-none"
+                />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    Adresse e-mail
+                  </label>
+                  <input
+                    type="email"
+                    required
+                    value={editForm.email}
+                    onChange={(e) => setEditForm({ ...editForm, email: e.target.value })}
+                    className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-600 focus:outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    Téléphone
+                  </label>
+                  <input
+                    type="tel"
+                    value={editForm.phone}
+                    onChange={(e) => setEditForm({ ...editForm, phone: e.target.value })}
+                    className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-600 focus:outline-none font-mono"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    Rôle & Privilèges
+                  </label>
+                  <select
+                    value={editForm.role}
+                    onChange={(e) => setEditForm({ ...editForm, role: e.target.value as UserRole })}
+                    disabled={(editingUser.email || '').trim().toLowerCase() === 'abdourahmanebathily1@gmail.com'}
+                    className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-600 focus:outline-none font-semibold text-slate-800 disabled:bg-slate-100"
+                  >
+                    <option value="owner">Propriétaire de Boutique</option>
+                    <option value="manager">Gérant de Boutique</option>
+                    <option value="cashier">Caissier / Vendeur Caisse</option>
+                    <option value="tailor">Couturier / Atelier</option>
+                    <option value="stock_manager">Gestionnaire de Stock</option>
+                    <option value="accountant">Comptable</option>
+                    <option value="delivery">Livreur</option>
+                    <option value="platform_admin">Admin Plateforme</option>
+                    <option value="superadmin">Super Admin (Plein Pouvoir)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    Boutique Assignée
+                  </label>
+                  <select
+                    value={editForm.boutiqueId}
+                    onChange={(e) => setEditForm({ ...editForm, boutiqueId: e.target.value })}
+                    className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-600 focus:outline-none text-slate-800"
+                  >
+                    {boutiques.map((b) => (
+                      <option key={b.id} value={b.id}>
+                        {b.name} ({b.city})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    Titre / Fonction
+                  </label>
+                  <input
+                    type="text"
+                    value={editForm.title}
+                    onChange={(e) => setEditForm({ ...editForm, title: e.target.value })}
+                    className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-600 focus:outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    Statut du Compte
+                  </label>
+                  <select
+                    value={editForm.status}
+                    onChange={(e) => setEditForm({ ...editForm, status: e.target.value as 'active' | 'suspended' })}
+                    disabled={(editingUser.email || '').trim().toLowerCase() === 'abdourahmanebathily1@gmail.com'}
+                    className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-600 focus:outline-none font-semibold text-slate-800 disabled:bg-slate-100"
+                  >
+                    <option value="active">Actif (Autorisé)</option>
+                    <option value="suspended">Suspendu (Bloqué)</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  Nouveau mot de passe (optionnel)
+                </label>
+                <div className="relative">
+                  <Lock className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+                  <input
+                    type="text"
+                    placeholder="Laisser vide pour ne pas changer"
+                    value={editForm.newPassword}
+                    onChange={(e) => setEditForm({ ...editForm, newPassword: e.target.value })}
+                    className="w-full pl-9 pr-3 py-2 text-xs border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-600 focus:outline-none font-mono"
+                  />
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setEditingUser(null)}
+                  disabled={isProcessing}
+                  className="px-4 py-2 border border-slate-200 text-slate-700 rounded-xl text-xs font-semibold hover:bg-slate-50 cursor-pointer"
+                >
+                  Annuler
+                </button>
+                <button
+                  type="submit"
+                  disabled={isProcessing}
+                  className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold shadow-sm transition-all flex items-center gap-2 cursor-pointer disabled:opacity-50"
+                >
+                  <Check className="w-4 h-4" />
+                  <span>{isProcessing ? 'Enregistrement...' : 'Enregistrer les Modifications'}</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* MODAL 3: DELETE USER CONFIRMATION                                         */}
+      {/* ========================================================================= */}
+      {deletingUser && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-rose-200 animate-in zoom-in-95">
+            <div className="w-12 h-12 rounded-xl bg-rose-50 text-rose-600 flex items-center justify-center mb-3">
+              <Trash2 className="w-6 h-6" />
+            </div>
+
+            <h3 className="text-base font-bold text-slate-900">
+              Supprimer définitivement l'utilisateur
+            </h3>
+
+            <p className="text-xs text-slate-600 mt-1 leading-relaxed">
+              Êtes-vous sûr de vouloir supprimer définitivement le compte de{' '}
+              <strong>{deletingUser.name || deletingUser.email}</strong> ({deletingUser.email}) ?
+            </p>
+
+            <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-800 mt-3 space-y-1">
+              <p className="font-bold flex items-center gap-1.5">
+                <AlertTriangle className="w-4 h-4 text-rose-600" />
+                Action irréversible
+              </p>
+              <p className="text-[11px] text-rose-700">
+                Cet utilisateur ne pourra plus se connecter et ses sessions seront révoquées immédiatement.
+              </p>
+            </div>
+
+            <div className="mt-4">
+              <label className="block text-xs font-semibold text-slate-700 mb-1">
+                Motif de la suppression (pour le journal d'audit)
+              </label>
+              <input
+                type="text"
+                value={deleteReason}
+                onChange={(e) => setDeleteReason(e.target.value)}
+                className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl focus:ring-2 focus:ring-rose-600 focus:outline-none"
+              />
+            </div>
+
+            <div className="flex items-center justify-end gap-2 mt-5">
+              <button
+                type="button"
+                onClick={() => setDeletingUser(null)}
+                disabled={isProcessing}
+                className="px-4 py-2 border border-slate-200 text-slate-700 rounded-xl text-xs font-semibold hover:bg-slate-50 cursor-pointer"
+              >
+                Annuler
+              </button>
+              <button
+                type="button"
+                onClick={handleDeleteUserSubmit}
+                disabled={isProcessing}
+                className="px-5 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold shadow-sm transition-all flex items-center gap-2 cursor-pointer disabled:opacity-50"
+              >
+                <Trash2 className="w-4 h-4" />
+                <span>{isProcessing ? 'Suppression...' : 'Supprimer Définitivement'}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* CONFIRMATION MODAL: FIREBASE PASSWORD RESET */}
       {confirmResetEmail && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
@@ -393,9 +1037,7 @@ export const SuperAdminUsers: React.FC = () => {
             <div className="w-12 h-12 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center mb-3">
               <KeyRound className="w-6 h-6" />
             </div>
-            <h3 className="text-base font-bold text-slate-900">
-              Réinitialiser le mot de passe
-            </h3>
+            <h3 className="text-base font-bold text-slate-900">Réinitialisation du mot de passe</h3>
             <p className="text-xs text-slate-600 mt-1 leading-relaxed">
               Voulez-vous envoyer un e-mail officiel de réinitialisation sécurisé via Firebase Authentication à :
             </p>
@@ -504,6 +1146,34 @@ export const SuperAdminUsers: React.FC = () => {
             </div>
 
             <div className="py-6 space-y-6 flex-1">
+              {/* Quick Actions in Drawer */}
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => {
+                    handleOpenEdit(selectedUser);
+                    setSelectedUser(null);
+                  }}
+                  className="flex-1 py-2 px-3 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                >
+                  <Pencil className="w-3.5 h-3.5" />
+                  <span>Modifier ce compte</span>
+                </button>
+
+                {(selectedUser.email || '').trim().toLowerCase() !== 'abdourahmanebathily1@gmail.com' &&
+                  selectedUser.id !== currentUser?.id && (
+                    <button
+                      onClick={() => {
+                        setDeletingUser(selectedUser);
+                        setDeleteReason('Suppression administrative Super Admin');
+                      }}
+                      className="py-2 px-3 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>Supprimer</span>
+                    </button>
+                  )}
+              </div>
+
               <div>
                 <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">
                   Profil & Contact
@@ -544,20 +1214,18 @@ export const SuperAdminUsers: React.FC = () => {
 
               <div>
                 <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">
-                  Boutiques de la Plateforme ({boutiques.length})
+                  Boutique Associée
                 </h4>
-                <div className="space-y-2 max-h-48 overflow-y-auto">
-                  {boutiques.map((b) => (
-                    <div key={b.id} className="p-3 bg-slate-50 rounded-xl border border-slate-100 flex items-center justify-between text-xs">
-                      <div className="flex items-center gap-2 min-w-0">
-                        <Store className="w-3.5 h-3.5 text-slate-500 shrink-0" />
-                        <span className="font-bold text-slate-900 truncate">{b.name}</span>
-                      </div>
-                      <span className="text-[10px] text-slate-500 uppercase font-mono shrink-0 ml-2">
-                        {b.city} · {b.planId}
-                      </span>
-                    </div>
-                  ))}
+                <div className="p-3 bg-slate-50 rounded-xl border border-slate-100 flex items-center justify-between text-xs">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <Store className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+                    <span className="font-bold text-slate-900 truncate">
+                      {boutiques.find(b => b.id === selectedUser.boutiqueId)?.name || 'Toutes les boutiques (Super Admin)'}
+                    </span>
+                  </div>
+                  <span className="text-[10px] text-slate-500 font-mono shrink-0 ml-2">
+                    {selectedUser.boutiqueId || 'btq-all'}
+                  </span>
                 </div>
               </div>
 

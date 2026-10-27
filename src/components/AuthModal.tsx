@@ -25,7 +25,9 @@ import {
   Clock,
   Layers,
   ChevronRight,
-  Shield
+  Shield,
+  Globe,
+  Copy
 } from 'lucide-react';
 import { UserRole, UserAccount } from '../types';
 import { ROLE_LABELS } from '../services/securityService';
@@ -46,6 +48,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     users,
     loginUser,
     loginWithEmail,
+    confirm2FALogin,
+    send2FACode,
     signInWithGoogle,
     logoutUser,
     isLoggedIn,
@@ -61,9 +65,25 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     selectedPlanForRegister,
   } = useStore();
 
-  const [activeTab, setActiveTab] = useState<'login' | 'register' | 'forgot' | 'join'>(
+  const [activeTab, setActiveTab] = useState<'login' | 'register' | 'forgot' | 'join' | '2fa'>(
     authModalInitialTab === 'register_boutique' ? 'register' : (defaultTab || 'login')
   );
+
+  // 2FA state management
+  const [twoFactorData, setTwoFactorData] = useState<{
+    email: string;
+    code: string;
+    user: UserAccount;
+    boutiques?: any[];
+    isSuperAdmin?: boolean;
+    expiresAt: number;
+  } | null>(null);
+  const [twoFactorCodeInput, setTwoFactorCodeInput] = useState('');
+  const [twoFactorError, setTwoFactorError] = useState('');
+  const [twoFactorSuccess, setTwoFactorSuccess] = useState('');
+  const [twoFactorAttempts, setTwoFactorAttempts] = useState(0);
+  const [resendCooldown, setResendCooldown] = useState(0);
+  const [twoFactorTimeRemaining, setTwoFactorTimeRemaining] = useState(600);
 
   // Sync tab with external prop
   useEffect(() => {
@@ -75,6 +95,28 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       setActiveTab('join');
     }
   }, [authModalInitialTab]);
+
+  // Timer countdown for 2FA expiration
+  useEffect(() => {
+    if (activeTab !== '2fa' || !twoFactorData) return;
+    const interval = setInterval(() => {
+      const remaining = Math.max(0, Math.floor((twoFactorData.expiresAt - Date.now()) / 1000));
+      setTwoFactorTimeRemaining(remaining);
+      if (remaining <= 0) {
+        setTwoFactorError('Le code de vérification a expiré. Veuillez en renvoyer un nouveau.');
+      }
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [activeTab, twoFactorData]);
+
+  // Resend cooldown countdown
+  useEffect(() => {
+    if (resendCooldown <= 0) return;
+    const timer = setInterval(() => {
+      setResendCooldown((prev) => Math.max(0, prev - 1));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [resendCooldown]);
 
   // Login form states (Strictly empty by default so users provide their genuine credentials)
   const [email, setEmail] = useState('');
@@ -126,6 +168,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const [forgotStep, setForgotStep] = useState<'request' | 'reset'>('request');
   const [forgotMsg, setForgotMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
+  // Domain authorization notice for Google OAuth
+  const [domainNotice, setDomainNotice] = useState<{ domain: string; message: string } | null>(null);
+  const [copiedDomain, setCopiedDomain] = useState(false);
+
   // Join invitation state
   const [inviteTokenInput, setInviteTokenInput] = useState('');
   const [inviteMsg, setInviteMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
@@ -141,8 +187,26 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     setIsLoggingIn(true);
 
     const cleanInputEmail = email.trim().toLowerCase();
-    const res = await loginWithEmail(email, password, rememberMe);
+    const res = await loginWithEmail(email, password, rememberMe, true);
     setIsLoggingIn(false);
+
+    if (res.success && res.require2FA && res.user && res.code) {
+      setTwoFactorData({
+        email: cleanInputEmail,
+        code: res.code,
+        user: res.user,
+        boutiques: res.boutiques || [],
+        isSuperAdmin: !!res.isSuperAdmin,
+        expiresAt: Date.now() + 10 * 60 * 1000,
+      });
+      setTwoFactorCodeInput('');
+      setTwoFactorError('');
+      setTwoFactorSuccess('');
+      setTwoFactorAttempts(0);
+      setResendCooldown(45);
+      setActiveTab('2fa');
+      return;
+    }
 
     if (res.success) {
       setLoginSuccess(res.message);
@@ -169,10 +233,84 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     }
   };
 
+  // Handle 2FA verification submission
+  const handleVerify2FA = (e: React.FormEvent) => {
+    e.preventDefault();
+    setTwoFactorError('');
+    setTwoFactorSuccess('');
+
+    if (!twoFactorData) {
+      setTwoFactorError('Session 2FA expirée. Veuillez vous reconnecter.');
+      return;
+    }
+
+    if (Date.now() > twoFactorData.expiresAt) {
+      setTwoFactorError('Le code de vérification a expiré. Cliquez sur Renvoyer pour en générer un nouveau.');
+      return;
+    }
+
+    const cleanInputCode = twoFactorCodeInput.trim().replace(/\s+/g, '');
+    if (cleanInputCode !== twoFactorData.code) {
+      const nextAttempts = twoFactorAttempts + 1;
+      setTwoFactorAttempts(nextAttempts);
+
+      if (nextAttempts >= 4) {
+        setTwoFactorError('Nombre maximal de tentatives dépassé. Session 2FA invalidée.');
+        setTimeout(() => {
+          setTwoFactorData(null);
+          setActiveTab('login');
+          setLoginError('Vérification échouée. Veuillez saisir à nouveau vos identifiants.');
+        }, 1500);
+      } else {
+        setTwoFactorError(`Code incorrect. Il vous reste ${4 - nextAttempts} tentative(s).`);
+      }
+      return;
+    }
+
+    // Code is valid: finalize 2FA authentication
+    setTwoFactorSuccess('Double authentification validée avec succès !');
+    confirm2FALogin(
+      twoFactorData.user,
+      twoFactorData.boutiques,
+      rememberMe,
+      twoFactorData.isSuperAdmin
+    );
+
+    setTimeout(() => {
+      onClose();
+      setTwoFactorData(null);
+      setTwoFactorSuccess('');
+      setActiveTab('login');
+    }, 700);
+  };
+
+  // Handle 2FA resend code
+  const handleResend2FACode = async () => {
+    if (!twoFactorData || resendCooldown > 0) return;
+    const res = await send2FACode(twoFactorData.email);
+    if (res.success && res.code) {
+      setTwoFactorData((prev) =>
+        prev
+          ? {
+              ...prev,
+              code: res.code!,
+              expiresAt: Date.now() + 10 * 60 * 1000,
+            }
+          : null
+      );
+      setResendCooldown(60);
+      setTwoFactorCodeInput('');
+      setTwoFactorError('');
+      setTwoFactorSuccess('Un nouveau code temporaire a été transmis.');
+      setTimeout(() => setTwoFactorSuccess(''), 4000);
+    }
+  };
+
   const handleGoogleSignIn = async () => {
     setIsLoggingIn(true);
     setLoginError('');
     setNeedsBoutiquePrompt(null);
+    setDomainNotice(null);
 
     try {
       const res = await signInWithGoogle();
@@ -195,7 +333,15 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           setLoginSuccess('');
         }, 700);
       } else {
-        setLoginError(res.message);
+        if (res.isUnauthorizedDomain) {
+          setDomainNotice({
+            domain: res.domain || (typeof window !== 'undefined' ? window.location.hostname : ''),
+            message: res.message,
+          });
+        } else {
+          setLoginError(res.message);
+        }
+
         if (res.needsBoutique && res.email) {
           setNeedsBoutiquePrompt({ email: res.email, name: res.name });
           setRegEmail(res.email);
@@ -308,56 +454,207 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         </div>
 
         {/* Tab Switcher */}
-        <div className="flex border-b border-neutral-200 bg-neutral-50 px-6 gap-1 pt-2 overflow-x-auto">
-          <button
-            onClick={() => {
-              setActiveTab('login');
-              setLoginError('');
-              setNeedsBoutiquePrompt(null);
-            }}
-            className={`px-3.5 py-2.5 text-xs font-bold border-b-2 transition-all whitespace-nowrap ${
-              activeTab === 'login'
-                ? 'border-neutral-950 text-neutral-950 bg-white rounded-t-xl'
-                : 'border-transparent text-neutral-500 hover:text-neutral-900'
-            }`}
-          >
-            Connexion
-          </button>
+        {activeTab === '2fa' ? (
+          <div className="flex items-center justify-between px-6 py-2.5 bg-blue-50/90 border-b border-blue-200 text-blue-950 text-xs font-semibold">
+            <div className="flex items-center gap-2">
+              <ShieldCheck className="w-4 h-4 text-blue-600 shrink-0" />
+              <span>Étape 2/2 : Vérification à deux facteurs (2FA) par e-mail</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setTwoFactorData(null);
+                setActiveTab('login');
+                setTwoFactorError('');
+              }}
+              className="text-[11px] font-bold text-blue-700 hover:text-blue-900 underline cursor-pointer"
+            >
+              ← Retour à la saisie
+            </button>
+          </div>
+        ) : (
+          <div className="flex border-b border-neutral-200 bg-neutral-50 px-6 gap-1 pt-2 overflow-x-auto">
+            <button
+              onClick={() => {
+                setActiveTab('login');
+                setLoginError('');
+                setNeedsBoutiquePrompt(null);
+                setDomainNotice(null);
+              }}
+              className={`px-3.5 py-2.5 text-xs font-bold border-b-2 transition-all whitespace-nowrap ${
+                activeTab === 'login'
+                  ? 'border-neutral-950 text-neutral-950 bg-white rounded-t-xl'
+                  : 'border-transparent text-neutral-500 hover:text-neutral-900'
+              }`}
+            >
+              Connexion
+            </button>
 
-          <button
-            onClick={() => {
-              setActiveTab('register');
-              setLoginError('');
-              setNeedsBoutiquePrompt(null);
-            }}
-            className={`px-3.5 py-2.5 text-xs font-bold border-b-2 transition-all whitespace-nowrap flex items-center gap-1.5 ${
-              activeTab === 'register'
-                ? 'border-neutral-950 text-neutral-950 bg-white rounded-t-xl'
-                : 'border-transparent text-neutral-500 hover:text-neutral-900'
-            }`}
-          >
-            <Sparkles className="w-3.5 h-3.5 text-amber-500" />
-            Créer ma Boutique
-          </button>
+            <button
+              onClick={() => {
+                setActiveTab('register');
+                setLoginError('');
+                setNeedsBoutiquePrompt(null);
+                setDomainNotice(null);
+              }}
+              className={`px-3.5 py-2.5 text-xs font-bold border-b-2 transition-all whitespace-nowrap flex items-center gap-1.5 ${
+                activeTab === 'register'
+                  ? 'border-neutral-950 text-neutral-950 bg-white rounded-t-xl'
+                  : 'border-transparent text-neutral-500 hover:text-neutral-900'
+              }`}
+            >
+              <Sparkles className="w-3.5 h-3.5 text-amber-500" />
+              Créer ma Boutique
+            </button>
 
-          <button
-            onClick={() => {
-              setActiveTab('join');
-              setLoginError('');
-              setNeedsBoutiquePrompt(null);
-            }}
-            className={`px-3.5 py-2.5 text-xs font-bold border-b-2 transition-all whitespace-nowrap ${
-              activeTab === 'join'
-                ? 'border-neutral-950 text-neutral-950 bg-white rounded-t-xl'
-                : 'border-transparent text-neutral-500 hover:text-neutral-900'
-            }`}
-          >
-            Rejoindre avec code
-          </button>
-        </div>
+            <button
+              onClick={() => {
+                setActiveTab('join');
+                setLoginError('');
+                setNeedsBoutiquePrompt(null);
+                setDomainNotice(null);
+              }}
+              className={`px-3.5 py-2.5 text-xs font-bold border-b-2 transition-all whitespace-nowrap ${
+                activeTab === 'join'
+                  ? 'border-neutral-950 text-neutral-950 bg-white rounded-t-xl'
+                  : 'border-transparent text-neutral-500 hover:text-neutral-900'
+              }`}
+            >
+              Rejoindre avec code
+            </button>
+          </div>
+        )}
 
         {/* Modal Body */}
         <div className="p-6 overflow-y-auto flex-1">
+          {/* TAB 0: 2FA VERIFICATION */}
+          {activeTab === '2fa' && twoFactorData && (
+            <form onSubmit={handleVerify2FA} className="space-y-5 max-w-md mx-auto py-2">
+              <div className="text-center">
+                <div className="w-14 h-14 mx-auto rounded-2xl bg-blue-50 border border-blue-200 flex items-center justify-center text-blue-600 mb-3 shadow-xs">
+                  <ShieldCheck className="w-8 h-8" />
+                </div>
+                <h3 className="text-lg font-black text-neutral-900 tracking-tight">Authentification à Deux Facteurs (2FA)</h3>
+                <p className="text-xs text-neutral-500 mt-1 max-w-sm mx-auto leading-relaxed">
+                  Pour sécuriser l'accès à votre boutique, un code temporaire à 6 chiffres a été envoyé par e-mail à :
+                </p>
+                <div className="mt-2.5 inline-flex items-center gap-1.5 px-3 py-1 bg-neutral-100 rounded-full text-xs font-semibold text-neutral-800 border border-neutral-200 shadow-2xs">
+                  <Mail className="w-3.5 h-3.5 text-neutral-500" />
+                  <span>{twoFactorData.email}</span>
+                </div>
+              </div>
+
+              {/* In-app notification card with the 2FA code */}
+              <div className="p-3.5 bg-gradient-to-r from-blue-50 via-indigo-50 to-blue-50 border border-blue-200 text-blue-950 rounded-2xl text-xs space-y-2 shadow-xs">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-blue-600 animate-pulse" />
+                    <span className="font-bold text-blue-900">Notification E-mail Sécurisée ModaFlow</span>
+                  </div>
+                  <span className="text-[10px] text-blue-700 bg-white px-2 py-0.5 rounded-full border border-blue-200 font-mono font-semibold">
+                    Exp. {Math.floor(twoFactorTimeRemaining / 60)}:{(twoFactorTimeRemaining % 60).toString().padStart(2, '0')}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between bg-white/80 backdrop-blur-xs p-2.5 rounded-xl border border-blue-200">
+                  <div className="flex items-center gap-2">
+                    <Key className="w-4 h-4 text-blue-600 shrink-0" />
+                    <span className="text-[11px] text-neutral-700">Code temporaire :</span>
+                    <strong className="font-mono text-base tracking-widest text-blue-950 bg-blue-100/60 px-2.5 py-0.5 rounded border border-blue-300">
+                      {twoFactorData.code}
+                    </strong>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setTwoFactorCodeInput(twoFactorData.code);
+                      setTwoFactorError('');
+                    }}
+                    className="text-[11px] font-bold text-blue-700 hover:text-blue-900 underline cursor-pointer"
+                  >
+                    Remplir le code
+                  </button>
+                </div>
+              </div>
+
+              {twoFactorError && (
+                <div className="p-3 bg-rose-50 border border-rose-200 text-rose-800 text-xs rounded-xl flex items-center gap-2 animate-fadeIn">
+                  <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+                  <span>{twoFactorError}</span>
+                </div>
+              )}
+
+              {twoFactorSuccess && (
+                <div className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs rounded-xl flex items-center gap-2 animate-fadeIn">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <span>{twoFactorSuccess}</span>
+                </div>
+              )}
+
+              {/* 6-digit Code Input */}
+              <div>
+                <label className="block text-xs font-semibold text-neutral-700 mb-1.5 text-center">
+                  Entrez votre code à 6 chiffres
+                </label>
+                <div className="max-w-xs mx-auto">
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    autoFocus
+                    required
+                    maxLength={6}
+                    placeholder="••••••"
+                    value={twoFactorCodeInput}
+                    onChange={(e) => {
+                      const val = e.target.value.replace(/[^0-9]/g, '').slice(0, 6);
+                      setTwoFactorCodeInput(val);
+                      if (twoFactorError) setTwoFactorError('');
+                    }}
+                    className="w-full text-center tracking-[0.4em] font-mono text-2xl py-3 border-2 border-neutral-300 rounded-2xl focus:border-neutral-950 focus:ring-2 focus:ring-neutral-900 focus:outline-none bg-neutral-50/60"
+                  />
+                </div>
+                <p className="text-[11px] text-neutral-500 text-center mt-1.5">
+                  Code à usage unique valable 10 minutes · Ne le communiquez à personne
+                </p>
+              </div>
+
+              {/* Submit button */}
+              <button
+                type="submit"
+                disabled={twoFactorCodeInput.length < 6 || !!twoFactorSuccess}
+                className="w-full py-3.5 bg-neutral-950 hover:bg-neutral-800 active:scale-98 text-white text-xs font-bold rounded-xl transition-all shadow-md disabled:opacity-50 cursor-pointer flex items-center justify-center gap-2"
+              >
+                <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                <span>{twoFactorSuccess ? 'Validation en cours...' : 'Valider & Débloquer ma session'}</span>
+                <ArrowRight className="w-4 h-4" />
+              </button>
+
+              {/* Resend & Back controls */}
+              <div className="pt-2 border-t border-neutral-100 flex items-center justify-between text-xs text-neutral-500">
+                <button
+                  type="button"
+                  disabled={resendCooldown > 0}
+                  onClick={handleResend2FACode}
+                  className="font-semibold text-blue-600 hover:text-blue-800 disabled:text-neutral-400 disabled:no-underline hover:underline cursor-pointer flex items-center gap-1"
+                >
+                  <span>{resendCooldown > 0 ? `Renvoyer le code (${resendCooldown}s)` : 'Renvoyer un nouveau code'}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setTwoFactorData(null);
+                    setActiveTab('login');
+                    setTwoFactorError('');
+                    setTwoFactorSuccess('');
+                  }}
+                  className="text-neutral-600 hover:text-neutral-950 hover:underline cursor-pointer"
+                >
+                  Changer de compte
+                </button>
+              </div>
+            </form>
+          )}
+
           {/* TAB 1: LOGIN */}
           {activeTab === 'login' && (
             <form onSubmit={handleLoginSubmit} className="space-y-4 max-w-md mx-auto">
@@ -518,6 +815,74 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 </svg>
                 <span>Continuer avec Google</span>
               </button>
+
+              {/* Notice explicative & Copie du domaine lorsque non autorisé */}
+              {domainNotice && (
+                <div className="p-3.5 bg-amber-50/95 border border-amber-300 rounded-xl text-xs space-y-2.5 animate-in fade-in duration-200">
+                  <div className="flex items-start gap-2.5">
+                    <Globe className="w-4 h-4 text-amber-600 mt-0.5 shrink-0" />
+                    <div>
+                      <p className="font-bold text-amber-950">Configuration Google OAuth requise</p>
+                      <p className="text-[11px] text-amber-800 mt-0.5 leading-relaxed">
+                        Google bloque la connexion OAuth sur ce domaine tant qu'il n'est pas autorisé dans votre console Firebase.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="bg-white p-2 rounded-lg border border-amber-200 flex items-center justify-between gap-2">
+                    <span className="font-mono text-[11px] text-neutral-800 truncate select-all">
+                      {domainNotice.domain}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (domainNotice.domain) {
+                          navigator.clipboard.writeText(domainNotice.domain);
+                          setCopiedDomain(true);
+                          setTimeout(() => setCopiedDomain(false), 2000);
+                        }
+                      }}
+                      className="px-2.5 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded-md font-semibold text-[10px] shrink-0 transition-colors flex items-center gap-1 cursor-pointer"
+                    >
+                      {copiedDomain ? (
+                        <>
+                          <Check className="w-3 h-3" />
+                          <span>Copié</span>
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="w-3 h-3" />
+                          <span>Copier</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+
+                  <div className="text-[11px] text-neutral-600 space-y-0.5">
+                    <p className="font-semibold text-neutral-800">
+                      💡 Pour autoriser ce domaine :
+                    </p>
+                    <p>
+                      Dans Firebase Console → <strong>Authentication</strong> → <strong>Paramètres</strong> → <strong>Domaines autorisés</strong> → <strong>Ajouter un domaine</strong>.
+                    </p>
+                  </div>
+
+                  <div className="pt-2 border-t border-amber-200 flex items-center justify-between">
+                    <span className="text-[11px] text-amber-900 font-medium">Alternative immédiate :</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDomainNotice(null);
+                        const emailInput = document.querySelector('input[type="email"]') as HTMLInputElement;
+                        if (emailInput) emailInput.focus();
+                      }}
+                      className="text-[11px] font-bold text-amber-700 hover:text-amber-900 underline cursor-pointer"
+                    >
+                      Connexion Email + 2FA (Prêt)
+                    </button>
+                  </div>
+                </div>
+              )}
 
               <div className="pt-4 border-t border-neutral-100 text-center">
                 <p className="text-xs text-neutral-500">

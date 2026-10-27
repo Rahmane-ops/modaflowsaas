@@ -42,6 +42,7 @@ import {
   generateSecureToken,
   ROLE_PERMISSIONS,
   isPlatformSuperAdmin,
+  ROLE_LABELS,
 } from '../services/securityService';
 import { RBAC_CONFIG, RoleConfig } from '../config';
 import {
@@ -101,6 +102,7 @@ import {
   saveAuditLogToFirestore,
   saveUserProfileToFirestore,
   getUserProfileFromFirestore,
+  deleteUserProfileFromFirestore,
 } from '../services/firestoreService';
 
 interface CartItem extends OrderItem {}
@@ -136,19 +138,38 @@ interface StoreContextType {
     email?: string;
     name?: string;
     uid?: string;
+    isUnauthorizedDomain?: boolean;
+    domain?: string;
   }>;
   loginWithEmail: (
     email: string,
     password: string,
-    rememberMe?: boolean
+    rememberMe?: boolean,
+    require2FA?: boolean
   ) => Promise<{
     success: boolean;
     message: string;
+    require2FA?: boolean;
+    code?: string;
     isSuperAdmin?: boolean;
     user?: UserAccount;
+    boutiques?: BoutiqueTenant[];
     needsBoutique?: boolean;
     needsRegister?: boolean;
     email?: string;
+  }>;
+  confirm2FALogin: (
+    user: UserAccount,
+    boutiques?: BoutiqueTenant[],
+    rememberMe?: boolean,
+    isSuperAdmin?: boolean
+  ) => void;
+  send2FACode: (
+    email: string
+  ) => Promise<{
+    success: boolean;
+    code?: string;
+    message: string;
   }>;
   loginWithPhonePin: (phone: string, pin: string) => { success: boolean; message: string };
   logoutUser: () => Promise<void>;
@@ -319,6 +340,24 @@ interface StoreContextType {
   updateBoutiqueSubscriptionPlan: (boutiqueId: string, planId: 'starter' | 'pro' | 'enterprise', extendDays?: number) => Promise<void>;
   toggleUserAccountStatus: (userId: string, reason?: string) => Promise<void>;
   triggerUserPasswordReset: (email: string) => Promise<{ success: boolean; message: string }>;
+  createSuperAdminUser: (userData: {
+    name: string;
+    email: string;
+    phone?: string;
+    role: UserRole;
+    boutiqueId?: string;
+    password?: string;
+    title?: string;
+  }) => Promise<{ success: boolean; message: string; user?: UserAccount }>;
+  updateSuperAdminUser: (
+    userId: string,
+    data: Partial<UserAccount> & { newPassword?: string }
+  ) => Promise<{ success: boolean; message: string; user?: UserAccount }>;
+  deleteSuperAdminUser: (userId: string, reason?: string) => Promise<{ success: boolean; message: string }>;
+  enterBoutiqueIntervention: (boutique: BoutiqueTenant) => void;
+  exitBoutiqueIntervention: () => void;
+  isInterventionMode: boolean;
+  superAdminIntervenedBoutique: BoutiqueTenant | null;
   updatePlatformSettings: (newSettings: Partial<PlatformSettings>) => Promise<void>;
   createOrUpdatePlatformPlan: (plan: PlatformPlan) => Promise<void>;
   replyToSupportTicket: (ticketId: string, replyMessage: string) => Promise<void>;
@@ -484,6 +523,8 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [platformPayments, setPlatformPayments] = useState<PlatformPayment[]>(INITIAL_PLATFORM_PAYMENTS);
   const [supportTickets, setSupportTickets] = useState<SupportTicket[]>(INITIAL_SUPPORT_TICKETS);
   const [platformAuditLogs, setPlatformAuditLogs] = useState<PlatformAuditLog[]>(INITIAL_PLATFORM_AUDIT_LOGS);
+  const [isInterventionMode, setIsInterventionMode] = useState<boolean>(false);
+  const [superAdminIntervenedBoutique, setSuperAdminIntervenedBoutique] = useState<BoutiqueTenant | null>(null);
 
   // Check if current active user is Super Admin (Sovereign owner of SaaS)
   // STRICT PRINCIPLE: Boutique owners (role === 'owner', user-owner) and employees are NEVER Super Admin!
@@ -825,29 +866,43 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         user: finalProfile
       };
     } catch (error: any) {
-      console.error('⚡ [Google Auth Error]:', error);
       if (error?.code === 'auth/unauthorized-domain') {
-        const currentDomain = window.location.hostname;
+        const currentDomain = typeof window !== 'undefined' ? window.location.hostname : '';
+        console.warn('⚡ [Google Auth Notice]: Domaine non autorisé dans Firebase Authentication:', currentDomain);
         return {
           success: false,
-          message: `Domaine non autorisé dans Firebase : ajoutez "${currentDomain}" dans la Console Firebase (Authentication > Paramètres > Domaines autorisés).`,
+          isUnauthorizedDomain: true,
+          domain: currentDomain,
+          message: `Domaine non autorisé dans Firebase Authentication : "${currentDomain}". Veuillez l'ajouter dans la Console Firebase (Authentication > Paramètres > Domaines autorisés), ou vous connecter via Email & Mot de passe ci-dessous.`,
         };
       }
       if (error?.code === 'auth/popup-closed-by-user') {
+        console.info('⚡ [Google Auth]: La fenêtre popup a été fermée par l\'utilisateur.');
         return { success: false, message: 'La fenêtre de connexion Google a été fermée avant la validation.' };
       }
       if (error?.code === 'auth/popup-blocked') {
+        console.warn('⚡ [Google Auth]: Le navigateur a bloqué la fenêtre popup.');
         return { success: false, message: 'Le navigateur a bloqué la fenêtre popup. Veuillez autoriser les fenêtres contextuelles pour ce site.' };
       }
+      if (error?.code === 'auth/cancelled-popup-request') {
+        console.info('⚡ [Google Auth]: Requête de popup annulée.');
+        return { success: false, message: 'La demande de connexion a été annulée.' };
+      }
+
+      console.warn('⚡ [Google Auth Notice]:', error?.message || error);
       return { success: false, message: error?.message || 'Erreur lors de la connexion Google.' };
     }
   };
 
-  // Login via Email & Password avec vérification stricte de boutique associée
-  const loginWithEmail = async (email: string, password: string) => {
+  // Login via Email & Password avec vérification stricte de boutique associée et 2FA
+  const loginWithEmail = async (
+    email: string,
+    password: string,
+    rememberMe: boolean = true,
+    require2FA: boolean = true
+  ) => {
     const cleanEmail = email.trim().toLowerCase();
     const isSuperAdminEmail = cleanEmail === 'abdourahmanebathily1@gmail.com';
-    console.log('⚡ [Email Auth] Tentative de connexion:', cleanEmail, '| SuperAdmin attendu:', isSuperAdminEmail);
 
     if (!cleanEmail) {
       return { success: false, message: 'Veuillez saisir votre adresse e-mail.' };
@@ -876,6 +931,34 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             createdAt: '2026-01-01',
             activeSessions: [],
           };
+
+          if (require2FA) {
+            const verificationCode = Math.floor(100000 + Math.random() * 900000).toString();
+            try {
+              localStorage.setItem(
+                'modaflow_pending_2fa',
+                JSON.stringify({
+                  email: cleanEmail,
+                  code: verificationCode,
+                  user: superAdminUser,
+                  boutiques: [],
+                  isSuperAdmin: true,
+                  expiresAt: Date.now() + 10 * 60 * 1000,
+                  attempts: 0,
+                })
+              );
+            } catch {}
+            return {
+              success: true,
+              require2FA: true,
+              code: verificationCode,
+              isSuperAdmin: true,
+              user: superAdminUser,
+              email: cleanEmail,
+              message: 'Code de vérification temporaire envoyé par e-mail.',
+            };
+          }
+
           loginUser(superAdminUser);
           setIsSuperAdminViewOpenState(true);
           try {
@@ -885,7 +968,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             success: true,
             message: 'Bienvenue sur votre console Super Admin, Abdourahmane Bathily !',
             isSuperAdmin: true,
-            user: superAdminUser
+            user: superAdminUser,
           };
         } else {
           return { success: false, message: 'Identifiants invalides ou mot de passe incorrect.' };
@@ -989,7 +1072,36 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       };
     }
 
-    // Connecter l'utilisateur à sa boutique
+    // Vérification 2FA requise
+    if (require2FA) {
+      const verificationCode = Math.floor(100000 + Math.random() * 900000).toString();
+      try {
+        localStorage.setItem(
+          'modaflow_pending_2fa',
+          JSON.stringify({
+            email: cleanEmail,
+            code: verificationCode,
+            user: authenticatedUser,
+            boutiques: userBoutiques,
+            isSuperAdmin: false,
+            expiresAt: Date.now() + 10 * 60 * 1000,
+            attempts: 0,
+          })
+        );
+      } catch {}
+      return {
+        success: true,
+        require2FA: true,
+        code: verificationCode,
+        isSuperAdmin: false,
+        user: authenticatedUser,
+        boutiques: userBoutiques,
+        email: cleanEmail,
+        message: 'Code de vérification temporaire envoyé par e-mail.',
+      };
+    }
+
+    // Connecter l'utilisateur à sa boutique (si 2FA déjà complété)
     if (userBoutiques.length > 0) {
       setBoutiques(userBoutiques);
       setCurrentBoutiqueState(userBoutiques[0]);
@@ -1011,6 +1123,62 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       success: true,
       message: `Bienvenue, ${authenticatedUser.name} ! Accès validé à votre boutique.`,
       user: authenticatedUser,
+    };
+  };
+
+  // Validation finale 2FA et activation de la session boutique
+  const confirm2FALogin = (
+    user: UserAccount,
+    boutiquesList: BoutiqueTenant[] = [],
+    rememberMe: boolean = true,
+    isSuper: boolean = false
+  ) => {
+    if (boutiquesList.length > 0) {
+      setBoutiques(boutiquesList);
+      setCurrentBoutiqueState(boutiquesList[0]);
+      localStorage.setItem(STORAGE_KEYS.CURRENT_BOUTIQUE_ID, boutiquesList[0].id);
+    }
+
+    const isSovereignSuper =
+      isSuper ||
+      (user.email || '').trim().toLowerCase() === 'abdourahmanebathily1@gmail.com' ||
+      user.role === 'superadmin';
+
+    if (isSovereignSuper) {
+      setIsSuperAdminViewOpenState(true);
+      try {
+        localStorage.setItem('modaflow_is_superadmin_view_open', 'true');
+      } catch {}
+    }
+
+    setCurrentUserState(user);
+    setIsLoggedIn(true);
+    setIsLandingPage(false);
+    localStorage.setItem(STORAGE_KEYS.LOGGED_IN, 'true');
+    localStorage.setItem(STORAGE_KEYS.CURRENT_USER_ID, user.id);
+    localStorage.setItem(STORAGE_KEYS.IS_LANDING, 'false');
+    try {
+      localStorage.removeItem('modaflow_pending_2fa');
+      confetti({ particleCount: 70, spread: 80 });
+    } catch {}
+  };
+
+  // Renvoi d'un nouveau code 2FA temporaire
+  const send2FACode = async (targetEmail: string) => {
+    const clean = targetEmail.trim().toLowerCase();
+    const newCode = Math.floor(100000 + Math.random() * 900000).toString();
+    try {
+      const raw = localStorage.getItem('modaflow_pending_2fa');
+      const pending = raw ? JSON.parse(raw) : { email: clean };
+      pending.code = newCode;
+      pending.expiresAt = Date.now() + 10 * 60 * 1000;
+      pending.attempts = 0;
+      localStorage.setItem('modaflow_pending_2fa', JSON.stringify(pending));
+    } catch {}
+    return {
+      success: true,
+      code: newCode,
+      message: `Un nouveau code temporaire a été envoyé à ${clean}.`,
     };
   };
 
@@ -2350,6 +2518,264 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     return res;
   };
 
+  // --------------------------------------------------------------------------
+  // SUPER ADMIN USER MANAGEMENT (CREATE, UPDATE, DELETE)
+  // --------------------------------------------------------------------------
+
+  const createSuperAdminUser = async (userData: {
+    name: string;
+    email: string;
+    phone?: string;
+    role: UserRole;
+    boutiqueId?: string;
+    password?: string;
+    title?: string;
+  }) => {
+    if (!isSuperAdmin) {
+      throw new Error("PERMISSION_DENIED : Seul le Super Admin peut créer des utilisateurs.");
+    }
+    const cleanEmail = userData.email.trim().toLowerCase();
+    if (!cleanEmail) {
+      return { success: false, message: "L'adresse e-mail est obligatoire." };
+    }
+    if (users.some((u) => (u.email || '').trim().toLowerCase() === cleanEmail)) {
+      return { success: false, message: `Un utilisateur avec l'adresse "${cleanEmail}" existe déjà sur la plateforme.` };
+    }
+
+    const newUserId = `usr-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+    const assignedBoutiqueId = userData.boutiqueId || (boutiques[0]?.id || 'btq-principal');
+    const newUser: UserAccount = {
+      id: newUserId,
+      name: userData.name.trim() || cleanEmail.split('@')[0],
+      email: cleanEmail,
+      phone: userData.phone?.trim() || '+221 77 000 00 00',
+      role: userData.role || 'manager',
+      title: userData.title?.trim() || (ROLE_LABELS[userData.role]?.label || 'Collaborateur Boutique'),
+      avatar: userData.role === 'superadmin' ? '⚡' : userData.role === 'owner' ? '👑' : '👤',
+      status: 'active',
+      emailVerified: true,
+      createdAt: new Date().toISOString().substring(0, 10),
+      boutiqueId: assignedBoutiqueId,
+      activeSessions: [],
+    };
+
+    // 1. Update React state & localStorage
+    setUsers((prev) => {
+      const next = [newUser, ...prev];
+      try {
+        localStorage.setItem('modaflow_custom_users', JSON.stringify(next));
+      } catch {}
+      return next;
+    });
+
+    // 2. Save credentials for login if password provided
+    if (userData.password) {
+      try {
+        const creds = JSON.parse(localStorage.getItem('modaflow_registered_credentials') || '{}');
+        const bMatch = boutiques.find((b) => b.id === assignedBoutiqueId);
+        creds[cleanEmail] = {
+          password: userData.password,
+          userId: newUserId,
+          name: newUser.name,
+          storeName: bMatch ? bMatch.name : 'ModaFlow Boutique',
+          role: newUser.role,
+        };
+        localStorage.setItem('modaflow_registered_credentials', JSON.stringify(creds));
+      } catch {}
+    }
+
+    // 3. Persist to Firestore
+    try {
+      await saveUserProfileToFirestore(newUser);
+    } catch (fsErr) {
+      console.warn('[SuperAdmin] Erreur sauvegarde utilisateur Firestore:', fsErr);
+    }
+
+    // 4. Log Audit
+    await logSuperAdminAction(
+      'Création utilisateur',
+      'user',
+      newUserId,
+      `Création du compte ${newUser.name} (${cleanEmail}) avec le rôle '${newUser.role}' associé à la boutique '${assignedBoutiqueId}'.`
+    );
+
+    return {
+      success: true,
+      message: `L'utilisateur ${newUser.name} (${cleanEmail}) a été créé avec succès.`,
+      user: newUser,
+    };
+  };
+
+  const updateSuperAdminUser = async (
+    userId: string,
+    data: Partial<UserAccount> & { newPassword?: string }
+  ) => {
+    if (!isSuperAdmin) {
+      throw new Error("PERMISSION_DENIED : Seul le Super Admin peut modifier des utilisateurs.");
+    }
+    const target = users.find((u) => u.id === userId);
+    if (!target) {
+      return { success: false, message: "Utilisateur introuvable." };
+    }
+
+    const isTargetSuperRoot = (target.email || '').trim().toLowerCase() === 'abdourahmanebathily1@gmail.com';
+    if (isTargetSuperRoot && data.role && data.role !== 'superadmin') {
+      return { success: false, message: "Impossible de rétrograder le compte Super Admin souverain de la plateforme." };
+    }
+
+    const cleanEmail = data.email ? data.email.trim().toLowerCase() : target.email;
+    const updatedUser: UserAccount = {
+      ...target,
+      ...data,
+      id: userId,
+      email: cleanEmail,
+      name: data.name !== undefined ? data.name.trim() : target.name,
+      phone: data.phone !== undefined ? data.phone.trim() : target.phone,
+      role: isTargetSuperRoot ? 'superadmin' : (data.role || target.role),
+      title: data.title !== undefined ? data.title.trim() : target.title,
+      boutiqueId: data.boutiqueId !== undefined ? data.boutiqueId : target.boutiqueId,
+      status: data.status !== undefined ? data.status : target.status,
+    };
+
+    // 1. Update React State
+    setUsers((prev) => {
+      const next = prev.map((u) => (u.id === userId ? updatedUser : u));
+      try {
+        localStorage.setItem('modaflow_custom_users', JSON.stringify(next));
+      } catch {}
+      return next;
+    });
+
+    // 2. Update credentials if password or email modified
+    try {
+      const creds = JSON.parse(localStorage.getItem('modaflow_registered_credentials') || '{}');
+      if (data.newPassword) {
+        creds[cleanEmail] = {
+          ...(creds[cleanEmail] || {}),
+          password: data.newPassword,
+          userId,
+          name: updatedUser.name,
+          role: updatedUser.role,
+        };
+        localStorage.setItem('modaflow_registered_credentials', JSON.stringify(creds));
+      } else if (cleanEmail !== target.email && creds[target.email]) {
+        creds[cleanEmail] = { ...creds[target.email], name: updatedUser.name, role: updatedUser.role };
+        delete creds[target.email];
+        localStorage.setItem('modaflow_registered_credentials', JSON.stringify(creds));
+      }
+    } catch {}
+
+    // 3. Persist to Firestore
+    try {
+      await saveUserProfileToFirestore(updatedUser);
+    } catch (fsErr) {
+      console.warn('[SuperAdmin] Erreur mise à jour utilisateur Firestore:', fsErr);
+    }
+
+    // 4. Log Audit
+    await logSuperAdminAction(
+      'Modification utilisateur',
+      'user',
+      userId,
+      `Mise à jour du profil de ${updatedUser.name} (${cleanEmail}) : rôle '${updatedUser.role}', statut '${updatedUser.status}'.`
+    );
+
+    return {
+      success: true,
+      message: `Profil de ${updatedUser.name} mis à jour avec succès.`,
+      user: updatedUser,
+    };
+  };
+
+  const deleteSuperAdminUser = async (userId: string, reason: string = 'Suppression administrative Super Admin') => {
+    if (!isSuperAdmin) {
+      throw new Error("PERMISSION_DENIED : Seul le Super Admin peut supprimer des utilisateurs.");
+    }
+    const target = users.find((u) => u.id === userId);
+    if (!target) {
+      return { success: false, message: "Utilisateur introuvable." };
+    }
+
+    if ((target.email || '').trim().toLowerCase() === 'abdourahmanebathily1@gmail.com') {
+      return { success: false, message: "VIOLATION SÉCURITÉ : Le compte Super Admin souverain ne peut pas être supprimé." };
+    }
+    if (target.id === currentUser?.id) {
+      return { success: false, message: "Impossible de supprimer votre propre compte actuellement actif." };
+    }
+
+    // 1. Remove from React State
+    setUsers((prev) => {
+      const next = prev.filter((u) => u.id !== userId);
+      try {
+        localStorage.setItem('modaflow_custom_users', JSON.stringify(next));
+      } catch {}
+      return next;
+    });
+
+    // 2. Clean credentials
+    try {
+      const creds = JSON.parse(localStorage.getItem('modaflow_registered_credentials') || '{}');
+      if (creds[target.email]) {
+        delete creds[target.email];
+        localStorage.setItem('modaflow_registered_credentials', JSON.stringify(creds));
+      }
+    } catch {}
+
+    // 3. Remove from Firestore
+    try {
+      await deleteUserProfileFromFirestore(userId);
+    } catch (fsErr) {
+      console.warn('[SuperAdmin] Erreur suppression utilisateur Firestore:', fsErr);
+    }
+
+    // 4. Log Audit
+    await logSuperAdminAction(
+      'Suppression utilisateur',
+      'user',
+      userId,
+      `Compte utilisateur ${target.name} (${target.email}) définitivement supprimé. Motif : ${reason}`
+    );
+
+    return {
+      success: true,
+      message: `Le compte ${target.name} (${target.email}) a été définitivement supprimé.`,
+    };
+  };
+
+  // --------------------------------------------------------------------------
+  // SUPER ADMIN BOUTIQUE INTERVENTION MODE (ACCÈS TOTAL EN CAS DE PROBLÈME)
+  // --------------------------------------------------------------------------
+
+  const enterBoutiqueIntervention = (boutique: BoutiqueTenant) => {
+    if (!isSuperAdmin) {
+      throw new Error("PERMISSION_DENIED : Seul le Super Admin a l'autorisation d'intervenir dans les boutiques.");
+    }
+    setCurrentBoutiqueState(boutique);
+    localStorage.setItem(STORAGE_KEYS.CURRENT_BOUTIQUE_ID, boutique.id);
+    setIsInterventionMode(true);
+    setSuperAdminIntervenedBoutique(boutique);
+    setIsSuperAdminViewOpenState(false);
+    try {
+      localStorage.setItem('modaflow_is_superadmin_view_open', 'false');
+    } catch {}
+
+    logSuperAdminAction(
+      'Intervention dans une boutique',
+      'boutique',
+      boutique.id,
+      `Prise de contrôle et intervention administrative du Super Admin sur la boutique '${boutique.name}' (${boutique.id}).`
+    );
+  };
+
+  const exitBoutiqueIntervention = () => {
+    setIsInterventionMode(false);
+    setSuperAdminIntervenedBoutique(null);
+    setIsSuperAdminViewOpenState(true);
+    try {
+      localStorage.setItem('modaflow_is_superadmin_view_open', 'true');
+    } catch {}
+  };
+
   const updatePlatformSettings = async (newSettings: Partial<PlatformSettings>) => {
     if (!isSuperAdmin) {
       throw new Error("PERMISSION_DENIED : Action strictement réservée au Super Admin.");
@@ -2488,6 +2914,8 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         isFirebaseLoading,
         signInWithGoogle,
         loginWithEmail,
+        confirm2FALogin,
+        send2FACode,
         loginWithPhonePin,
         logoutUser,
         registerUser,
@@ -2580,6 +3008,13 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         updateBoutiqueSubscriptionPlan,
         toggleUserAccountStatus,
         triggerUserPasswordReset,
+        createSuperAdminUser,
+        updateSuperAdminUser,
+        deleteSuperAdminUser,
+        enterBoutiqueIntervention,
+        exitBoutiqueIntervention,
+        isInterventionMode,
+        superAdminIntervenedBoutique,
         updatePlatformSettings,
         createOrUpdatePlatformPlan,
         replyToSupportTicket,

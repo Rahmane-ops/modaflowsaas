@@ -619,3 +619,16 @@ export const getUserProfileFromFirestore = async (userId: string): Promise<UserA
     return null;
   }
 };
+
+/**
+ * Delete User Profile from Firestore (Super Admin only)
+ */
+export const deleteUserProfileFromFirestore = async (userId: string): Promise<void> => {
+  if (!auth.currentUser) return;
+  try {
+    const docRef = doc(db, 'users', userId);
+    await deleteDoc(docRef);
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, `users/${userId}`);
+  }
+};

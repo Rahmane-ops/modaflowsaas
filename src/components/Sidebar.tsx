@@ -162,10 +162,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 onClick={() => setIsBoutiqueMenuOpen(false)} 
               />
               <div className="absolute left-3 right-3 top-14 bg-white rounded-xl shadow-lg border border-slate-200/90 py-1.5 z-40 animate-in fade-in slide-in-from-top-1">
-                <div className="px-3 py-1.5 border-b border-slate-100">
+                <div className="px-3 py-1.5 border-b border-slate-100 flex items-center justify-between">
                   <p className="text-[10px] font-bold text-slate-600 uppercase tracking-wider">
-                    Mes Boutiques ({boutiques.length})
+                    {isSuperAdmin ? `Toutes les Boutiques (${boutiques.length})` : `Mes Boutiques (${boutiques.length})`}
                   </p>
+                  {isSuperAdmin && (
+                    <span className="text-[9px] font-bold text-amber-700 bg-amber-100 px-1.5 py-0.2 rounded">
+                      Accès Total
+                    </span>
+                  )}
                 </div>
                 <div className="max-h-48 overflow-y-auto p-1 space-y-0.5">
                   {boutiques.map((b) => {
