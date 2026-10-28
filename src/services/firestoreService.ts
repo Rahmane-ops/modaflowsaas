@@ -602,27 +602,63 @@ export const getUserProfileFromFirestore = async (userId: string): Promise<UserA
 
 /**
  * Delete User Profile from Firestore (Super Admin only)
+ * Cleans by user ID and optionally purges any document matching this email
  */
-export const deleteUserProfileFromFirestore = async (userId: string): Promise<void> => {
-  if (!auth.currentUser) return;
+export const deleteUserProfileFromFirestore = async (userId: string, email?: string): Promise<void> => {
   try {
-    const docRef = doc(db, 'users', userId);
-    await deleteDoc(docRef);
+    if (userId) {
+      const docRef = doc(db, 'users', userId);
+      await deleteDoc(docRef);
+    }
+    if (email) {
+      const cleanEmail = email.trim().toLowerCase();
+      const usersCol = collection(db, 'users');
+      const q = query(usersCol, where('email', '==', cleanEmail));
+      const snaps = await getDocs(q);
+      for (const d of snaps.docs) {
+        await deleteDoc(d.ref);
+      }
+    }
   } catch (error) {
-    handleFirestoreError(error, OperationType.DELETE, `users/${userId}`);
+    console.warn('[Firestore] Notice suppression profil utilisateur:', error);
   }
 };
 
 /**
  * Delete Boutique from Firestore (Super Admin only)
+ * Purges boutique document, any boutique matching ownerEmail, and all operational sub-records
  */
-export const deleteBoutiqueFromFirestore = async (boutiqueId: string): Promise<void> => {
-  if (!auth.currentUser) return;
+export const deleteBoutiqueFromFirestore = async (boutiqueId: string, ownerEmail?: string): Promise<void> => {
   try {
     const docRef = doc(db, 'boutiques', boutiqueId);
     await deleteDoc(docRef);
+
+    if (ownerEmail) {
+      const cleanEmail = ownerEmail.trim().toLowerCase();
+      const boutiquesCol = collection(db, 'boutiques');
+      const q = query(boutiquesCol, where('ownerEmail', '==', cleanEmail));
+      const snaps = await getDocs(q);
+      for (const d of snaps.docs) {
+        if (d.id === boutiqueId) {
+          await deleteDoc(d.ref);
+        }
+      }
+    }
+
+    // Clean orphaned collections in Firestore for this boutique
+    const collectionsToClean = ['clothes', 'orders', 'clients', 'transactions', 'cash_closings', 'audit_logs'];
+    for (const colName of collectionsToClean) {
+      try {
+        const colRef = collection(db, colName);
+        const q = query(colRef, where('boutiqueId', '==', boutiqueId));
+        const snaps = await getDocs(q);
+        for (const d of snaps.docs) {
+          await deleteDoc(d.ref);
+        }
+      } catch {}
+    }
   } catch (error) {
-    handleFirestoreError(error, OperationType.DELETE, `boutiques/${boutiqueId}`);
+    console.warn('[Firestore] Notice suppression boutique et données associées:', error);
   }
 };
 

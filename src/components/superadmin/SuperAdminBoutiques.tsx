@@ -23,6 +23,7 @@ import {
   ExternalLink,
   Trash2,
   RotateCcw,
+  Pencil,
 } from 'lucide-react';
 
 export const SuperAdminBoutiques: React.FC = () => {
@@ -33,6 +34,7 @@ export const SuperAdminBoutiques: React.FC = () => {
     enterBoutiqueIntervention,
     platformPlans,
     deleteBoutique,
+    updateBoutique,
     resetAllDemoDataAndKeepSuperAdmin,
   } = useStore();
 
@@ -50,6 +52,26 @@ export const SuperAdminBoutiques: React.FC = () => {
   const [deletingBoutique, setDeletingBoutique] = useState<BoutiqueTenant | null>(null);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [actionSuccessMessage, setActionSuccessMessage] = useState<string | null>(null);
+
+  // Edit Boutique states
+  const [editingBoutique, setEditingBoutique] = useState<BoutiqueTenant | null>(null);
+  const [editBoutiqueForm, setEditBoutiqueForm] = useState<{
+    name: string;
+    city: string;
+    country: string;
+    phone: string;
+    currency: string;
+    ownerEmail: string;
+    ownerName: string;
+  }>({
+    name: '',
+    city: 'Dakar',
+    country: 'Sénégal',
+    phone: '',
+    currency: 'FCFA',
+    ownerEmail: '',
+    ownerName: '',
+  });
 
   // Extend / Change Plan Modal
   const [extendingBoutique, setExtendingBoutique] = useState<BoutiqueTenant | null>(null);
@@ -122,6 +144,43 @@ export const SuperAdminBoutiques: React.FC = () => {
       setTimeout(() => setActionSuccessMessage(null), 5000);
     } catch (err: any) {
       alert(`Erreur : ${err.message}`);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleOpenEditBoutique = (b: BoutiqueTenant) => {
+    setEditingBoutique(b);
+    setEditBoutiqueForm({
+      name: b.name || '',
+      city: b.city || 'Dakar',
+      country: b.country || 'Sénégal',
+      phone: b.phone || '',
+      currency: b.currency || 'FCFA',
+      ownerEmail: b.ownerEmail || '',
+      ownerName: b.ownerName || '',
+    });
+  };
+
+  const handleConfirmEditBoutique = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingBoutique) return;
+    setIsSubmitting(true);
+    try {
+      const res = await updateBoutique(editingBoutique.id, {
+        name: editBoutiqueForm.name.trim(),
+        city: editBoutiqueForm.city.trim(),
+        country: editBoutiqueForm.country.trim(),
+        phone: editBoutiqueForm.phone.trim(),
+        currency: editBoutiqueForm.currency.trim(),
+        ownerEmail: editBoutiqueForm.ownerEmail.trim().toLowerCase(),
+        ownerName: editBoutiqueForm.ownerName.trim(),
+      });
+      setActionSuccessMessage(res.message);
+      setEditingBoutique(null);
+      setTimeout(() => setActionSuccessMessage(null), 4000);
+    } catch (err: any) {
+      alert(`Erreur : ${err?.message || 'Erreur lors de la mise à jour'}`);
     } finally {
       setIsSubmitting(false);
     }
@@ -318,6 +377,15 @@ export const SuperAdminBoutiques: React.FC = () => {
                           title="Voir la fiche détaillée"
                         >
                           <Eye className="w-3.5 h-3.5" />
+                        </button>
+
+                        {/* Modifier la boutique */}
+                        <button
+                          onClick={() => handleOpenEditBoutique(b)}
+                          className="p-1.5 rounded-lg border border-slate-200 text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition-colors cursor-pointer"
+                          title="Modifier les coordonnées et informations de cette boutique"
+                        >
+                          <Pencil className="w-3.5 h-3.5" />
                         </button>
 
                         {/* Plan / Extension */}
@@ -693,6 +761,141 @@ export const SuperAdminBoutiques: React.FC = () => {
                 {isSubmitting ? 'Purge en cours...' : 'Confirmer la purge & remise à zéro'}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: EDIT BOUTIQUE */}
+      {editingBoutique && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 animate-in zoom-in-95">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-4">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 bg-slate-900 text-white rounded-xl">
+                  <Pencil className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-900">Modifier la Boutique</h3>
+                  <p className="text-xs text-slate-500 font-mono">{editingBoutique.id}</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setEditingBoutique(null)}
+                className="p-1.5 text-slate-400 hover:text-slate-900 rounded-lg hover:bg-slate-100"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleConfirmEditBoutique} className="space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  Nom de la boutique * :
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={editBoutiqueForm.name}
+                  onChange={(e) => setEditBoutiqueForm({ ...editBoutiqueForm, name: e.target.value })}
+                  className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl focus:ring-2 focus:ring-slate-900 focus:outline-none"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    Ville * :
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={editBoutiqueForm.city}
+                    onChange={(e) => setEditBoutiqueForm({ ...editBoutiqueForm, city: e.target.value })}
+                    className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl focus:ring-2 focus:ring-slate-900 focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    Pays * :
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={editBoutiqueForm.country}
+                    onChange={(e) => setEditBoutiqueForm({ ...editBoutiqueForm, country: e.target.value })}
+                    className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl focus:ring-2 focus:ring-slate-900 focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    Téléphone boutique :
+                  </label>
+                  <input
+                    type="text"
+                    value={editBoutiqueForm.phone}
+                    onChange={(e) => setEditBoutiqueForm({ ...editBoutiqueForm, phone: e.target.value })}
+                    className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl focus:ring-2 focus:ring-slate-900 focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    Devise :
+                  </label>
+                  <input
+                    type="text"
+                    value={editBoutiqueForm.currency}
+                    onChange={(e) => setEditBoutiqueForm({ ...editBoutiqueForm, currency: e.target.value })}
+                    className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl focus:ring-2 focus:ring-slate-900 focus:outline-none font-semibold"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    Nom du propriétaire :
+                  </label>
+                  <input
+                    type="text"
+                    value={editBoutiqueForm.ownerName}
+                    onChange={(e) => setEditBoutiqueForm({ ...editBoutiqueForm, ownerName: e.target.value })}
+                    className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl focus:ring-2 focus:ring-slate-900 focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    E-mail propriétaire :
+                  </label>
+                  <input
+                    type="email"
+                    value={editBoutiqueForm.ownerEmail}
+                    onChange={(e) => setEditBoutiqueForm({ ...editBoutiqueForm, ownerEmail: e.target.value })}
+                    className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl focus:ring-2 focus:ring-slate-900 focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-2 pt-4 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setEditingBoutique(null)}
+                  className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl"
+                >
+                  Annuler
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSubmitting}
+                  className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold transition-all disabled:opacity-50"
+                >
+                  {isSubmitting ? 'Enregistrement...' : 'Enregistrer les modifications'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

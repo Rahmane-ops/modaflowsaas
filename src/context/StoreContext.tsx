@@ -106,6 +106,7 @@ import {
   deleteUserProfileFromFirestore,
   deleteBoutiqueFromFirestore,
   verifyFirestoreSyncConnection,
+  sanitizeForFirestore,
 } from '../services/firestoreService';
 
 interface CartItem extends OrderItem {}
@@ -367,6 +368,7 @@ interface StoreContextType {
   createSupportTicket: (ticketData: Omit<SupportTicket, 'id' | 'ticketNumber' | 'createdAt' | 'updatedAt' | 'replies'>) => Promise<SupportTicket>;
   logSuperAdminAction: (action: string, resource: PlatformAuditLog['resource'], resourceId?: string, details?: string, reason?: string) => Promise<void>;
   deleteBoutique: (boutiqueId: string) => Promise<{ success: boolean; message: string }>;
+  updateBoutique: (boutiqueId: string, updates: Partial<BoutiqueTenant>) => Promise<{ success: boolean; message: string; boutique?: BoutiqueTenant }>;
   resetAllDemoDataAndKeepSuperAdmin: () => Promise<{ success: boolean; message: string }>;
   checkFirestoreSync: () => Promise<{
     success: boolean;
@@ -1307,10 +1309,10 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             fbUser = loginCred.user;
             userId = fbUser.uid;
           } catch {
-            return {
-              success: false,
-              message: 'Cette adresse e-mail existe déjà. Veuillez vous connecter avec votre mot de passe.',
-            };
+            // Si l'e-mail existe dans Firebase Auth mais que la boutique ou l'utilisateur a été supprimé,
+            // on ne bloque PAS le commerçant avec "email existe déjà" : on lui permet d'enregistrer sa nouvelle boutique !
+            console.log('[Register] E-mail présent dans Firebase Auth, réinitialisation de session pour nouvelle boutique:', cleanEmail);
+            userId = `usr-${cleanEmail.replace(/[^a-zA-Z0-9]/g, '_')}_${Date.now().toString(36)}`;
           }
         } else {
           // Resilient fallback ID for any other auth provider limitation
@@ -2623,8 +2625,66 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     if (!cleanEmail) {
       return { success: false, message: "L'adresse e-mail est obligatoire." };
     }
-    if (users.some((u) => (u.email || '').trim().toLowerCase() === cleanEmail)) {
-      return { success: false, message: `Un utilisateur avec l'adresse "${cleanEmail}" existe déjà sur la plateforme.` };
+    const existingIndex = users.findIndex((u) => (u.email || '').trim().toLowerCase() === cleanEmail);
+    if (existingIndex > -1) {
+      const existingUser = users[existingIndex];
+      const existingBoutique = boutiques.find((b) => b.id === existingUser.boutiqueId);
+      if (existingBoutique && existingUser.status === 'active') {
+        return {
+          success: false,
+          message: `Un utilisateur avec l'adresse "${cleanEmail}" existe déjà sur la boutique "${existingBoutique.name}". Vous pouvez modifier son compte ou ses accès directement depuis la liste.`,
+        };
+      }
+
+      // Si l'utilisateur existait mais que sa boutique a été supprimée ou qu'il était suspendu,
+      // on le réaffecte avec succès à la boutique demandée :
+      const assignedBoutiqueId = userData.boutiqueId || (boutiques[0]?.id || '');
+      const updatedUser: UserAccount = {
+        ...existingUser,
+        name: userData.name.trim() || existingUser.name,
+        role: userData.role || existingUser.role,
+        title: userData.title?.trim() || existingUser.title,
+        boutiqueId: assignedBoutiqueId,
+        status: 'active',
+      };
+      setUsers((prev) => {
+        const next = [...prev];
+        next[existingIndex] = updatedUser;
+        try {
+          localStorage.setItem('modaflow_custom_users', JSON.stringify(next));
+        } catch {}
+        return next;
+      });
+      if (userData.password) {
+        try {
+          const creds = JSON.parse(localStorage.getItem('modaflow_registered_credentials') || '{}');
+          const bMatch = boutiques.find((b) => b.id === assignedBoutiqueId);
+          creds[cleanEmail] = {
+            password: userData.password,
+            userId: updatedUser.id,
+            name: updatedUser.name,
+            storeName: bMatch ? bMatch.name : 'ModaFlow Boutique',
+            role: updatedUser.role,
+          };
+          localStorage.setItem('modaflow_registered_credentials', JSON.stringify(creds));
+        } catch {}
+      }
+      try {
+        await saveUserProfileToFirestore(updatedUser);
+      } catch (fsErr) {
+        console.warn('[SuperAdmin] Erreur réassignation utilisateur Firestore:', fsErr);
+      }
+      await logSuperAdminAction(
+        'Réassignation utilisateur',
+        'user',
+        updatedUser.id,
+        `Réassignation du compte ${updatedUser.name} (${cleanEmail}) à la boutique '${assignedBoutiqueId}'.`
+      );
+      return {
+        success: true,
+        message: `Le compte ${updatedUser.name} (${cleanEmail}) a été réassigné et activé sur la boutique avec succès.`,
+        user: updatedUser,
+      };
     }
 
     const newUserId = `usr-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
@@ -2781,7 +2841,9 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       return { success: false, message: "Utilisateur introuvable." };
     }
 
-    if ((target.email || '').trim().toLowerCase() === 'abdourahmanebathily1@gmail.com') {
+    const cleanEmail = (target.email || '').trim().toLowerCase();
+
+    if (cleanEmail === 'abdourahmanebathily1@gmail.com') {
       return { success: false, message: "VIOLATION SÉCURITÉ : Le compte Super Admin souverain ne peut pas être supprimé." };
     }
     if (target.id === currentUser?.id) {
@@ -2790,25 +2852,24 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
     // 1. Remove from React State
     setUsers((prev) => {
-      const next = prev.filter((u) => u.id !== userId);
+      const next = prev.filter((u) => u.id !== userId && (u.email || '').trim().toLowerCase() !== cleanEmail);
       try {
         localStorage.setItem('modaflow_custom_users', JSON.stringify(next));
       } catch {}
       return next;
     });
 
-    // 2. Clean credentials
+    // 2. Clean credentials completely
     try {
       const creds = JSON.parse(localStorage.getItem('modaflow_registered_credentials') || '{}');
-      if (creds[target.email]) {
-        delete creds[target.email];
-        localStorage.setItem('modaflow_registered_credentials', JSON.stringify(creds));
-      }
+      if (creds[target.email]) delete creds[target.email];
+      if (creds[cleanEmail]) delete creds[cleanEmail];
+      localStorage.setItem('modaflow_registered_credentials', JSON.stringify(creds));
     } catch {}
 
-    // 3. Remove from Firestore
+    // 3. Remove from Firestore (both by ID and by email)
     try {
-      await deleteUserProfileFromFirestore(userId);
+      await deleteUserProfileFromFirestore(userId, cleanEmail);
     } catch (fsErr) {
       console.warn('[SuperAdmin] Erreur suppression utilisateur Firestore:', fsErr);
     }
@@ -2832,6 +2893,9 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       throw new Error("PERMISSION_DENIED : Seul le Super Admin peut supprimer une boutique.");
     }
     const target = boutiques.find((b) => b.id === boutiqueId);
+    const ownerEmail = (target?.ownerEmail || '').trim().toLowerCase();
+    const ownerId = target?.ownerId;
+
     const remaining = boutiques.filter((b) => b.id !== boutiqueId);
     setBoutiques(remaining);
     try {
@@ -2848,8 +2912,37 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       }
     }
 
+    // Libérer l'adresse e-mail et supprimer le compte orphelin si le commerçant n'a pas d'autre boutique
+    if (ownerEmail && ownerEmail !== 'abdourahmanebathily1@gmail.com') {
+      const hasOtherBoutique = remaining.some(
+        (b) => (b.ownerEmail || '').trim().toLowerCase() === ownerEmail
+      );
+      if (!hasOtherBoutique) {
+        setUsers((prev) => {
+          const next = prev.filter(
+            (u) => (u.email || '').trim().toLowerCase() !== ownerEmail && u.id !== ownerId
+          );
+          try {
+            localStorage.setItem('modaflow_custom_users', JSON.stringify(next));
+          } catch {}
+          return next;
+        });
+
+        try {
+          const creds = JSON.parse(localStorage.getItem('modaflow_registered_credentials') || '{}');
+          if (creds[ownerEmail]) delete creds[ownerEmail];
+          if (target?.ownerEmail && creds[target.ownerEmail]) delete creds[target.ownerEmail];
+          localStorage.setItem('modaflow_registered_credentials', JSON.stringify(creds));
+        } catch {}
+
+        try {
+          await deleteUserProfileFromFirestore(ownerId || '', ownerEmail);
+        } catch {}
+      }
+    }
+
     try {
-      await deleteBoutiqueFromFirestore(boutiqueId);
+      await deleteBoutiqueFromFirestore(boutiqueId, ownerEmail);
     } catch (fsErr) {
       console.warn('[Firestore] Erreur suppression boutique:', fsErr);
     }
@@ -2858,12 +2951,60 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       'Suppression boutique',
       'boutique',
       boutiqueId,
-      `Boutique '${target?.name || boutiqueId}' supprimée de la plateforme.`
+      `Boutique '${target?.name || boutiqueId}' supprimée de la plateforme avec nettoyage de ses données associées.`
     );
 
     return {
       success: true,
       message: `La boutique '${target?.name || boutiqueId}' a été supprimée avec succès.`,
+    };
+  };
+
+  const updateBoutique = async (boutiqueId: string, updates: Partial<BoutiqueTenant>) => {
+    if (!isSuperAdmin) {
+      throw new Error("PERMISSION_DENIED : Seul le Super Admin peut modifier une boutique.");
+    }
+    const target = boutiques.find((b) => b.id === boutiqueId);
+    if (!target) {
+      return { success: false, message: "Boutique introuvable." };
+    }
+
+    const updatedBoutique: BoutiqueTenant = {
+      ...target,
+      ...updates,
+      id: boutiqueId,
+    };
+
+    setBoutiques((prev) => {
+      const next = prev.map((b) => (b.id === boutiqueId ? updatedBoutique : b));
+      try {
+        localStorage.setItem('modaflow_custom_boutiques', JSON.stringify(next));
+      } catch {}
+      return next;
+    });
+
+    if (currentBoutique.id === boutiqueId) {
+      setCurrentBoutiqueState(updatedBoutique);
+    }
+
+    try {
+      const docRef = doc(db, 'boutiques', boutiqueId);
+      await updateDoc(docRef, sanitizeForFirestore(updates));
+    } catch (fsErr) {
+      console.warn('[Firestore] Erreur mise à jour boutique Firestore:', fsErr);
+    }
+
+    await logSuperAdminAction(
+      'Modification boutique',
+      'boutique',
+      boutiqueId,
+      `Boutique '${updatedBoutique.name}' (${boutiqueId}) mise à jour dans Firestore.`
+    );
+
+    return {
+      success: true,
+      message: `La boutique '${updatedBoutique.name}' a été mise à jour avec succès.`,
+      boutique: updatedBoutique,
     };
   };
 
@@ -3241,6 +3382,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         createSupportTicket,
         logSuperAdminAction,
         deleteBoutique,
+        updateBoutique,
         resetAllDemoDataAndKeepSuperAdmin,
         checkFirestoreSync,
       }}
