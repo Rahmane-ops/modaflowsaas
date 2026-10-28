@@ -49,7 +49,7 @@ export const EditOrderModal: React.FC<EditOrderModalProps> = ({
   // Exchange article selector
   const [isAddingExchange, setIsAddingExchange] = useState(false);
   const [selectedExchangeClothId, setSelectedExchangeClothId] = useState(clothes[0]?.id || '');
-  const [selectedExchangeSize, setSelectedExchangeSize] = useState('M');
+  const [selectedExchangeSize, setSelectedExchangeSize] = useState('38');
   const [selectedExchangeQty, setSelectedExchangeQty] = useState(1);
 
   // Return trigger for a specific item
@@ -282,14 +282,18 @@ export const EditOrderModal: React.FC<EditOrderModalProps> = ({
                     onChange={(e) => setSelectedExchangeSize(e.target.value)}
                     className="w-full px-3 py-2 rounded-xl border border-neutral-200 bg-white text-xs font-semibold"
                   >
-                    <option value="S">S</option>
-                    <option value="M">M</option>
-                    <option value="L">L</option>
-                    <option value="XL">XL</option>
-                    <option value="38">38</option>
-                    <option value="40">40</option>
-                    <option value="42">42</option>
-                    <option value="Standard">Standard</option>
+                    {(() => {
+                      const sel = clothes.find((c) => c.id === selectedExchangeClothId);
+                      const szList = sel?.sizes?.length ? sel.sizes : ['34', '36', '38', '40', '42', '44', '46'];
+                      return szList.map((sz) => {
+                        const st = sel?.sizeStock?.[sz];
+                        return (
+                          <option key={sz} value={sz}>
+                            Taille {sz} {typeof st === 'number' ? `(${st} en stock)` : ''}
+                          </option>
+                        );
+                      });
+                    })()}
                   </select>
                 </div>
               </div>

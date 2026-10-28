@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useMemo } from 'react';
 import { useStore } from '../context/StoreContext';
 import { 
   X, 
@@ -12,7 +12,9 @@ import {
   Camera, 
   AlertCircle,
   FileImage,
-  RefreshCw
+  RefreshCw,
+  Hash,
+  Boxes
 } from 'lucide-react';
 
 interface NewProductModalProps {
@@ -21,6 +23,14 @@ interface NewProductModalProps {
 }
 
 type ImageMode = 'upload' | 'url' | 'presets';
+
+export interface SizeStockItem {
+  size: string;
+  stock: number;
+}
+
+// Tailles numériques réelles pour le prêt-à-porter & haute couture (style 32, 34, 36, 38, 40, 42...)
+const STANDARD_NUMERIC_SIZES = ['32', '34', '36', '38', '40', '42', '44', '46', '48', '50', '52'];
 
 export const NewProductModal: React.FC<NewProductModalProps> = ({
   isOpen,
@@ -33,9 +43,18 @@ export const NewProductModal: React.FC<NewProductModalProps> = ({
   const [category, setCategory] = useState<'robes' | 'hauts' | 'ensembles' | 'pantalons' | 'combinaisons' | 'accessoires'>('robes');
   const [price, setPrice] = useState<number>(35000);
   const [costPrice, setCostPrice] = useState<number>(18000);
-  const [stock, setStock] = useState<number>(10);
   const [minStockAlert, setMinStockAlert] = useState<number>(3);
-  const [sizesInput, setSizesInput] = useState('S, M, L, XL');
+  
+  // Tailles chiffrées & Stock par taille disponible
+  const [sizeStocks, setSizeStocks] = useState<SizeStockItem[]>([
+    { size: '36', stock: 4 },
+    { size: '38', stock: 6 },
+    { size: '40', stock: 4 },
+    { size: '42', stock: 2 },
+  ]);
+  const [customSizeInput, setCustomSizeInput] = useState('');
+  const [bulkQtyInput, setBulkQtyInput] = useState('');
+
   const [colorsInput, setColorsInput] = useState('Noir, Doré');
   const [description, setDescription] = useState('');
 
@@ -180,6 +199,64 @@ export const NewProductModal: React.FC<NewProductModalProps> = ({
     }
   };
 
+  // Auto-calculated total stock based on sizes
+  const totalCalculatedStock = useMemo(() => {
+    return sizeStocks.reduce((sum, item) => sum + (Math.max(0, Number(item.stock)) || 0), 0);
+  }, [sizeStocks]);
+
+  const handleToggleStandardSize = (sz: string) => {
+    if (sizeStocks.some((item) => item.size === sz)) {
+      setSizeStocks((prev) => prev.filter((item) => item.size !== sz));
+    } else {
+      setSizeStocks((prev) =>
+        [...prev, { size: sz, stock: 3 }].sort(
+          (a, b) => (Number(a.size) || 0) - (Number(b.size) || 0)
+        )
+      );
+    }
+  };
+
+  const handleAddCustomSize = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    const clean = customSizeInput.trim().replace(/^T\./i, '');
+    if (!clean) return;
+    if (!sizeStocks.some((item) => item.size === clean)) {
+      setSizeStocks((prev) =>
+        [...prev, { size: clean, stock: 3 }].sort(
+          (a, b) => (Number(a.size) || 0) - (Number(b.size) || 0)
+        )
+      );
+    }
+    setCustomSizeInput('');
+  };
+
+  const handleUpdateSizeQty = (size: string, qty: number) => {
+    setSizeStocks((prev) =>
+      prev.map((item) => (item.size === size ? { ...item, stock: Math.max(0, qty) } : item))
+    );
+  };
+
+  const handleQuickDelta = (size: string, delta: number) => {
+    setSizeStocks((prev) =>
+      prev.map((item) =>
+        item.size === size
+          ? { ...item, stock: Math.max(0, (Number(item.stock) || 0) + delta) }
+          : item
+      )
+    );
+  };
+
+  const handleRemoveSize = (size: string) => {
+    setSizeStocks((prev) => prev.filter((item) => item.size !== size));
+  };
+
+  const handleApplyBulkQty = () => {
+    const qty = parseInt(bulkQtyInput);
+    if (isNaN(qty) || qty < 0) return;
+    setSizeStocks((prev) => prev.map((item) => ({ ...item, stock: qty })));
+    setBulkQtyInput('');
+  };
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!canCreate) {
@@ -188,10 +265,20 @@ export const NewProductModal: React.FC<NewProductModalProps> = ({
     }
     if (!name.trim()) return;
 
-    const sizes = sizesInput
-      .split(',')
-      .map((s) => s.trim())
-      .filter(Boolean);
+    if (sizeStocks.length === 0) {
+      alert("Veuillez sélectionner au moins une taille numérique (ex: 36, 38, 42).");
+      return;
+    }
+
+    const activeSizes = sizeStocks.map((s) => s.size.trim()).filter(Boolean);
+    const sizeStockMap: Record<string, number> = {};
+    sizeStocks.forEach((s) => {
+      if (s.size.trim()) {
+        sizeStockMap[s.size.trim()] = Math.max(0, Number(s.stock) || 0);
+      }
+    });
+
+    const totalStock = Object.values(sizeStockMap).reduce((a, b) => a + b, 0);
 
     const colors = colorsInput
       .split(',')
@@ -203,9 +290,10 @@ export const NewProductModal: React.FC<NewProductModalProps> = ({
       category,
       price: Number(price),
       costPrice: Number(costPrice),
-      stock: Number(stock),
+      stock: totalStock > 0 ? totalStock : 1,
       minStockAlert: Number(minStockAlert),
-      sizes: sizes.length ? sizes : ['Standard'],
+      sizes: activeSizes.length ? activeSizes : ['38'],
+      sizeStock: sizeStockMap,
       colors: colors.length ? colors : ['Unique'],
       description: description.trim() || 'Modèle confectionné avec soin dans notre atelier.',
       imageUrl: selectedImage || availableImages[0].path,
@@ -258,7 +346,7 @@ export const NewProductModal: React.FC<NewProductModalProps> = ({
             />
           </div>
 
-          {/* Section: Catégorie & Stock initial */}
+          {/* Section: Catégorie & Alerte Stock */}
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block font-semibold text-neutral-700 mb-1">
@@ -280,14 +368,14 @@ export const NewProductModal: React.FC<NewProductModalProps> = ({
 
             <div>
               <label className="block font-semibold text-neutral-700 mb-1">
-                Stock initial (pièces) *
+                Alerte stock bas (seuil minimum)
               </label>
               <input
                 type="number"
                 min="1"
                 required
-                value={stock}
-                onChange={(e) => setStock(parseInt(e.target.value) || 0)}
+                value={minStockAlert}
+                onChange={(e) => setMinStockAlert(parseInt(e.target.value) || 1)}
                 className="w-full px-3 py-2 rounded-xl border border-neutral-200 text-xs font-mono font-bold focus:ring-2 focus:ring-blue-600 focus:outline-none"
               />
             </div>
@@ -324,30 +412,200 @@ export const NewProductModal: React.FC<NewProductModalProps> = ({
             </div>
           </div>
 
-          {/* Section: Tailles & Couleurs */}
-          <div className="grid grid-cols-2 gap-3">
+          {/* ======================================================== */}
+          {/* SECTION: TAILLES NUMÉRIQUES (32, 36, 42...) & STOCK PAR TAILLE */}
+          {/* ======================================================== */}
+          <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div>
+                <label className="block font-bold text-slate-900 text-xs flex items-center gap-1.5">
+                  <Hash className="w-4 h-4 text-blue-600" />
+                  <span>Tailles Numériques & Stock par Taille *</span>
+                </label>
+                <p className="text-[11px] text-slate-500 mt-0.5">
+                  Tailles chiffrées de prêt-à-porter (32, 34, 36, 38, 40, 42, 44...). Définissez le nombre de pièces disponibles par taille.
+                </p>
+              </div>
+
+              {/* Total Stock Indicator Badge */}
+              <div className="self-start sm:self-auto px-3 py-1.5 rounded-xl bg-blue-100/80 border border-blue-200 text-blue-900 flex items-center gap-1.5">
+                <Boxes className="w-3.5 h-3.5 text-blue-700" />
+                <span className="font-bold text-xs">{totalCalculatedStock} pièces</span>
+                <span className="text-[10px] text-blue-700">au total</span>
+              </div>
+            </div>
+
+            {/* Quick-add Standard Numeric Size Chips */}
+            <div>
+              <span className="text-[11px] font-semibold text-slate-600 block mb-1.5">
+                Sélection rapide des tailles standards :
+              </span>
+              <div className="flex flex-wrap gap-1.5">
+                {STANDARD_NUMERIC_SIZES.map((sz) => {
+                  const isSelected = sizeStocks.some((item) => item.size === sz);
+                  return (
+                    <button
+                      key={sz}
+                      type="button"
+                      onClick={() => handleToggleStandardSize(sz)}
+                      className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1 ${
+                        isSelected
+                          ? 'bg-blue-600 text-white shadow-2xs scale-102 ring-1 ring-blue-700'
+                          : 'bg-white text-slate-700 border border-slate-200 hover:border-blue-400 hover:bg-blue-50/50'
+                      }`}
+                      title={isSelected ? `Retirer la taille ${sz}` : `Ajouter la taille ${sz}`}
+                    >
+                      <span>T.{sz}</span>
+                      {isSelected ? (
+                        <Check className="w-3 h-3 text-white" />
+                      ) : (
+                        <Plus className="w-3 h-3 text-slate-400" />
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Custom Numeric Size Input */}
+            <div className="flex items-center gap-2 pt-1">
+              <input
+                type="text"
+                value={customSizeInput}
+                onChange={(e) => setCustomSizeInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    handleAddCustomSize();
+                  }
+                }}
+                placeholder="Autre taille chiffrée (ex: 30, 54, 56...)"
+                className="px-3 py-1.5 rounded-xl border border-slate-200 bg-white text-xs w-56 focus:ring-2 focus:ring-blue-600 focus:outline-none"
+              />
+              <button
+                type="button"
+                onClick={() => handleAddCustomSize()}
+                className="px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold cursor-pointer transition-colors flex items-center gap-1"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Ajouter</span>
+              </button>
+            </div>
+
+            {/* Configured Sizes with Stock Inputs */}
+            {sizeStocks.length > 0 ? (
+              <div className="pt-2 border-t border-slate-200/80">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-[11px] font-bold text-slate-700">
+                    Stock par taille disponible ({sizeStocks.length} tailles configurées) :
+                  </span>
+
+                  {/* Bulk Qty Setter */}
+                  <div className="flex items-center gap-1.5 text-[11px]">
+                    <span className="text-slate-500 hidden sm:inline">Même stock pour tous :</span>
+                    <input
+                      type="number"
+                      min="0"
+                      value={bulkQtyInput}
+                      onChange={(e) => setBulkQtyInput(e.target.value)}
+                      placeholder="Qté"
+                      className="w-14 px-2 py-0.5 rounded-lg border border-slate-200 bg-white text-center font-mono text-xs"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleApplyBulkQty}
+                      className="px-2 py-0.5 rounded-lg bg-slate-200 hover:bg-slate-300 text-slate-800 font-medium text-[11px] cursor-pointer"
+                    >
+                      Appliquer
+                    </button>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-52 overflow-y-auto pr-1">
+                  {sizeStocks.map((item) => (
+                    <div
+                      key={item.size}
+                      className="flex items-center justify-between gap-2 p-2 rounded-xl bg-white border border-slate-200 shadow-2xs"
+                    >
+                      <div className="flex items-center gap-2">
+                        <span className="w-8 h-8 rounded-lg bg-blue-50 text-blue-700 font-bold font-mono text-xs flex items-center justify-center border border-blue-200/60 shrink-0">
+                          {item.size}
+                        </span>
+                        <div>
+                          <p className="font-bold text-slate-900 text-xs">Taille {item.size}</p>
+                          <p className="text-[10px] text-slate-400">Stock dispo</p>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => handleQuickDelta(item.size, -1)}
+                          className="w-6 h-6 rounded border border-slate-200 flex items-center justify-center font-bold text-slate-600 hover:bg-slate-100 cursor-pointer"
+                          title="Diminuer de 1"
+                        >
+                          -
+                        </button>
+                        <input
+                          type="number"
+                          min="0"
+                          value={item.stock}
+                          onChange={(e) => handleUpdateSizeQty(item.size, parseInt(e.target.value) || 0)}
+                          className="w-12 px-1.5 py-1 border border-slate-200 rounded text-center font-mono font-bold text-xs text-slate-900 focus:ring-2 focus:ring-blue-600 focus:outline-none"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => handleQuickDelta(item.size, 1)}
+                          className="w-6 h-6 rounded border border-slate-200 flex items-center justify-center font-bold text-slate-600 hover:bg-slate-100 cursor-pointer"
+                          title="Ajouter 1"
+                        >
+                          +
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveSize(item.size)}
+                          className="w-6 h-6 ml-1 rounded text-rose-500 hover:bg-rose-50 flex items-center justify-center cursor-pointer transition-colors"
+                          title="Supprimer cette taille"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <div className="p-3 bg-amber-50 rounded-xl border border-amber-200 text-amber-800 text-xs flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
+                <span>Veuillez sélectionner au moins une taille numérique ci-dessus (ex: 36, 38, 40).</span>
+              </div>
+            )}
+          </div>
+
+          {/* Section: Coloris disponibles & Description */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="block font-semibold text-neutral-700 mb-1">
-                Tailles disponibles (séparées par virgule)
+                Coloris disponibles (séparés par virgule)
               </label>
               <input
                 type="text"
-                value={sizesInput}
-                onChange={(e) => setSizesInput(e.target.value)}
-                placeholder="Ex: S, M, L, XL"
+                value={colorsInput}
+                onChange={(e) => setColorsInput(e.target.value)}
+                placeholder="Ex: Noir, Émeraude, Doré"
                 className="w-full px-3 py-2 rounded-xl border border-neutral-200 text-xs focus:ring-2 focus:ring-blue-600 focus:outline-none"
               />
             </div>
 
             <div>
               <label className="block font-semibold text-neutral-700 mb-1">
-                Coloris disponibles
+                Description / Détails de confection
               </label>
               <input
                 type="text"
-                value={colorsInput}
-                onChange={(e) => setColorsInput(e.target.value)}
-                placeholder="Ex: Noir, Émeraude"
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                placeholder="Ex: Soie crêpe fluide avec finitions or."
                 className="w-full px-3 py-2 rounded-xl border border-neutral-200 text-xs focus:ring-2 focus:ring-blue-600 focus:outline-none"
               />
             </div>

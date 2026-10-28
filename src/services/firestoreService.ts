@@ -421,14 +421,26 @@ export const executeOrderSaleTransaction = async (params: {
 
   try {
     await runTransaction(db, async (transaction) => {
-      // 1. Check stock for each cloth item before decrementing
+      // 1. Check stock for each cloth item before decrementing (both total stock and sizeStock)
       for (const item of cartItems) {
         const clothRef = doc(db, 'clothes', item.clothingId);
         const clothSnap = await transaction.get(clothRef);
         if (clothSnap.exists()) {
-          const currentStock = clothSnap.data().stock || 0;
+          const data = clothSnap.data();
+          const currentStock = data.stock || 0;
           const newStock = Math.max(0, currentStock - item.quantity);
-          transaction.update(clothRef, { stock: newStock });
+          const updateData: Record<string, any> = { stock: newStock };
+
+          if (data.sizeStock && item.size && typeof data.sizeStock[item.size] === 'number') {
+            const currentSizeStock = data.sizeStock[item.size] || 0;
+            const newSizeStock = {
+              ...data.sizeStock,
+              [item.size]: Math.max(0, currentSizeStock - item.quantity),
+            };
+            updateData.sizeStock = newSizeStock;
+          }
+
+          transaction.update(clothRef, updateData);
         }
       }
 

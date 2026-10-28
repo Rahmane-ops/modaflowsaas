@@ -113,6 +113,7 @@ service cloud.firestore {
         (!('costPrice' in data) || (data.costPrice is number && data.costPrice >= 0)) &&
         (!('minStockAlert' in data) || (data.minStockAlert is number && data.minStockAlert >= 0)) &&
         (!('sizes' in data) || (data.sizes is list && data.sizes.size() <= 20)) &&
+        (!('sizeStock' in data) || (data.sizeStock is map)) &&
         (!('colors' in data) || (data.colors is list && data.colors.size() <= 20)) &&
         (!('imageUrl' in data) || (data.imageUrl is string && data.imageUrl.size() <= 500)) &&
         (!('description' in data) || (data.description is string && data.description.size() <= 1000)) &&

@@ -165,6 +165,7 @@ export interface ClothingItem {
   stock: number;
   minStockAlert: number;
   sizes: string[];
+  sizeStock?: Record<string, number>; // Quantité de stock disponible par taille (ex: { "36": 5, "38": 10, "40": 4 })
   colors: string[];
   imageUrl: string;
   description: string;

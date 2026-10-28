@@ -325,7 +325,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onOpenAuth, onEnterDas
                   Ajoutez vos vêtements
                 </h3>
                 <p className="text-sm text-neutral-600 leading-relaxed">
-                  Renseignez le nom (ex: <em>Robe Wax Émeraude</em>), les tailles disponibles (S, M, L, XL), le prix et votre stock initial. C'est prêt !
+                  Renseignez le nom (ex: <em>Robe Wax Émeraude</em>), les tailles chiffrées (36, 38, 40, 42), le stock par taille et vos prix. C'est prêt !
                 </p>
               </div>
               <div className="mt-6 pt-4 border-t border-neutral-100 text-xs font-semibold text-neutral-500">
@@ -463,7 +463,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onOpenAuth, onEnterDas
                 <div className="p-3 rounded-xl border border-neutral-200 bg-neutral-50/50 flex flex-col justify-between">
                   <div>
                     <span className="text-xs font-bold text-neutral-900 block">Ensemble Chemisier Lin</span>
-                    <span className="text-xs text-neutral-500 block">Tailles : S, M, XL · Reste : 8</span>
+                    <span className="text-xs text-neutral-500 block">Tailles : 36, 38, 40 · Reste : 8</span>
                   </div>
                   <div className="mt-3 flex items-center justify-between">
                     <span className="font-black text-sm text-neutral-950">28 000 FCFA</span>

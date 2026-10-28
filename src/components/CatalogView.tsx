@@ -67,14 +67,29 @@ export const CatalogView: React.FC<CatalogViewProps> = ({ onOpenNewProduct, onOp
   const handleOpenAddModal = (item: ClothingItem) => {
     if (item.stock <= 0) return;
     setSelectedItemForSize(item);
-    setChosenSize(item.sizes[0] || 'Standard');
+    // Find first size that has stock > 0, if sizeStock exists
+    let firstAvailableSize = item.sizes[0] || '38';
+    if (item.sizeStock) {
+      const available = item.sizes.find((s) => (item.sizeStock?.[s] || 0) > 0);
+      if (available) firstAvailableSize = available;
+    }
+    setChosenSize(firstAvailableSize);
     setChosenQty(1);
   };
 
   const handleConfirmAdd = () => {
     if (!selectedItemForSize) return;
+    const availableInSize = selectedItemForSize.sizeStock?.[chosenSize];
+    if (typeof availableInSize === 'number' && availableInSize <= 0) {
+      alert(`La taille ${chosenSize} est actuellement épuisée.`);
+      return;
+    }
+    if (typeof availableInSize === 'number' && chosenQty > availableInSize) {
+      alert(`Stock insuffisant : seulement ${availableInSize} pièce(s) disponible(s) en taille ${chosenSize}.`);
+      return;
+    }
     addToCart(selectedItemForSize, chosenSize, chosenQty);
-    setToastMessage(`✓ ${chosenQty}x ${selectedItemForSize.name} (${chosenSize}) ajouté au panier !`);
+    setToastMessage(`✓ ${chosenQty}x ${selectedItemForSize.name} (Taille ${chosenSize}) ajouté à la caisse !`);
     setSelectedItemForSize(null);
     setTimeout(() => {
       setToastMessage(null);
@@ -289,17 +304,31 @@ export const CatalogView: React.FC<CatalogViewProps> = ({ onOpenNewProduct, onOp
                       {item.description}
                     </p>
 
-                    {/* Sizes chips */}
+                    {/* Sizes chips with numeric format & stock badges */}
                     <div className="mt-3 flex items-center gap-1.5 flex-wrap">
-                      <span className="text-[10px] font-semibold text-neutral-400">Tailles :</span>
-                      {item.sizes.map((size) => (
-                        <span
-                          key={size}
-                          className="px-1.5 py-0.5 rounded border border-neutral-200 bg-neutral-50 text-neutral-700 text-[10px] font-medium"
-                        >
-                          {size}
-                        </span>
-                      ))}
+                      <span className="text-[10px] font-bold text-slate-500">Tailles :</span>
+                      {item.sizes.map((size) => {
+                        const qty = item.sizeStock?.[size];
+                        const isOut = typeof qty === 'number' && qty <= 0;
+                        return (
+                          <span
+                            key={size}
+                            className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded border text-[10px] font-medium transition-colors ${
+                              isOut
+                                ? 'border-slate-200 bg-slate-100 text-slate-400 line-through'
+                                : 'border-blue-200/80 bg-blue-50/70 text-blue-900 font-semibold'
+                            }`}
+                            title={typeof qty === 'number' ? `Taille ${size} : ${qty} pièces disponibles` : `Taille ${size}`}
+                          >
+                            <span>T.{size}</span>
+                            {typeof qty === 'number' && (
+                              <span className={`text-[9px] px-1 rounded-xs font-mono font-bold ${isOut ? 'text-slate-400' : 'bg-blue-200/60 text-blue-800'}`}>
+                                {qty}
+                              </span>
+                            )}
+                          </span>
+                        );
+                      })}
                     </div>
                   </div>
                 </div>
@@ -359,40 +388,75 @@ export const CatalogView: React.FC<CatalogViewProps> = ({ onOpenNewProduct, onOp
 
             {/* Size selection */}
             <div className="mt-5">
-              <label className="block text-xs font-semibold text-neutral-700 mb-2">
-                Choisir la taille :
-              </label>
-              <div className="grid grid-cols-4 gap-2">
-                {selectedItemForSize.sizes.map((size) => (
-                  <button
-                    key={size}
-                    type="button"
-                    onClick={() => setChosenSize(size)}
-                    className={`py-2 rounded-xl text-xs font-semibold border transition-all ${
-                      chosenSize === size
-                        ? 'border-neutral-900 bg-neutral-900 text-white shadow-xs'
-                        : 'border-neutral-200 bg-white text-neutral-800 hover:border-neutral-300'
-                    }`}
-                  >
-                    {size}
-                  </button>
-                ))}
+              <div className="flex items-center justify-between mb-2">
+                <label className="block text-xs font-bold text-neutral-800">
+                  Choisir la taille numérique :
+                </label>
+                {selectedItemForSize.sizeStock && typeof selectedItemForSize.sizeStock[chosenSize] === 'number' && (
+                  <span className="text-[11px] font-semibold text-blue-700">
+                    Stock taille {chosenSize} : {selectedItemForSize.sizeStock[chosenSize]} pcs
+                  </span>
+                )}
+              </div>
+              <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
+                {selectedItemForSize.sizes.map((size) => {
+                  const sizeQty = selectedItemForSize.sizeStock?.[size];
+                  const isOut = typeof sizeQty === 'number' && sizeQty <= 0;
+                  const isSelected = chosenSize === size;
+                  return (
+                    <button
+                      key={size}
+                      type="button"
+                      disabled={isOut}
+                      onClick={() => {
+                        setChosenSize(size);
+                        setChosenQty(1);
+                      }}
+                      className={`p-2 rounded-xl text-xs font-semibold border transition-all flex flex-col items-center justify-center cursor-pointer ${
+                        isOut
+                          ? 'border-neutral-200 bg-neutral-100 text-neutral-400 opacity-60 cursor-not-allowed'
+                          : isSelected
+                          ? 'border-blue-600 bg-blue-600 text-white shadow-xs scale-102 ring-1 ring-blue-700'
+                          : 'border-neutral-200 bg-white text-neutral-800 hover:border-blue-400 hover:bg-blue-50/30'
+                      }`}
+                    >
+                      <span className="font-bold text-xs">Taille {size}</span>
+                      <span
+                        className={`text-[10px] mt-0.5 ${
+                          isSelected
+                            ? 'text-blue-100'
+                            : isOut
+                            ? 'text-rose-500 font-medium'
+                            : 'text-neutral-500 font-medium'
+                        }`}
+                      >
+                        {isOut
+                          ? 'Épuisé'
+                          : typeof sizeQty === 'number'
+                          ? `${sizeQty} en stock`
+                          : 'Disponible'}
+                      </span>
+                    </button>
+                  );
+                })}
               </div>
             </div>
 
             {/* Quantity */}
             <div className="mt-5">
               <div className="flex items-center justify-between text-xs font-semibold text-neutral-700 mb-2">
-                <span>Quantité :</span>
+                <span>Quantité à encaisser :</span>
                 <span className="text-neutral-500 font-normal">
-                  Dispo : {selectedItemForSize.stock} pièces
+                  {typeof selectedItemForSize.sizeStock?.[chosenSize] === 'number'
+                    ? `Max dispo en T.${chosenSize} : ${selectedItemForSize.sizeStock[chosenSize]} pièce(s)`
+                    : `Dispo globale : ${selectedItemForSize.stock} pièces`}
                 </span>
               </div>
               <div className="flex items-center gap-3">
                 <button
                   type="button"
                   onClick={() => setChosenQty((q) => Math.max(1, q - 1))}
-                  className="w-10 h-10 rounded-xl border border-neutral-200 flex items-center justify-center font-bold text-neutral-700 hover:bg-neutral-50"
+                  className="w-10 h-10 rounded-xl border border-neutral-200 flex items-center justify-center font-bold text-neutral-700 hover:bg-neutral-50 cursor-pointer"
                 >
                   -
                 </button>
@@ -401,10 +465,13 @@ export const CatalogView: React.FC<CatalogViewProps> = ({ onOpenNewProduct, onOp
                 </span>
                 <button
                   type="button"
-                  onClick={() =>
-                    setChosenQty((q) => Math.min(selectedItemForSize.stock, q + 1))
-                  }
-                  className="w-10 h-10 rounded-xl border border-neutral-200 flex items-center justify-center font-bold text-neutral-700 hover:bg-neutral-50"
+                  onClick={() => {
+                    const maxAllowed = typeof selectedItemForSize.sizeStock?.[chosenSize] === 'number'
+                      ? selectedItemForSize.sizeStock[chosenSize]
+                      : selectedItemForSize.stock;
+                    setChosenQty((q) => Math.min(Math.max(1, maxAllowed), q + 1));
+                  }}
+                  className="w-10 h-10 rounded-xl border border-neutral-200 flex items-center justify-center font-bold text-neutral-700 hover:bg-neutral-50 cursor-pointer"
                 >
                   +
                 </button>

@@ -1847,7 +1847,16 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       setClothes((prev) =>
         prev.map((c) => {
           const item = cart.find((ci) => ci.clothingId === c.id);
-          return item ? { ...c, stock: Math.max(0, c.stock - item.quantity) } : c;
+          if (!item) return c;
+          const newStock = Math.max(0, c.stock - item.quantity);
+          let newSizeStock = c.sizeStock;
+          if (c.sizeStock && item.size && typeof c.sizeStock[item.size] === 'number') {
+            newSizeStock = {
+              ...c.sizeStock,
+              [item.size]: Math.max(0, c.sizeStock[item.size] - item.quantity),
+            };
+          }
+          return { ...c, stock: newStock, sizeStock: newSizeStock };
         })
       );
       if (clientRecord) {
