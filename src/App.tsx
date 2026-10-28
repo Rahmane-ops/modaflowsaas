@@ -227,23 +227,6 @@ const AppContent: React.FC = () => {
           </div>
         )}
 
-        {/* Demo / Visitor Mode notification banner */}
-        {!firebaseUser && (
-          <div className="bg-amber-50/90 border-b border-amber-200/80 px-4 sm:px-6 py-2 text-xs text-amber-900 flex items-center justify-between gap-3">
-            <div className="flex items-center gap-2">
-              <span className="inline-block w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
-              <span>
-                <strong>Mode Démo :</strong> Connectez-vous avec Google pour enregistrer vos vraies ventes, stocks et clients dans Cloud Firestore.
-              </span>
-            </div>
-            <button
-              onClick={() => setAuthModalOpen(true)}
-              className="px-2.5 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded text-xs font-semibold cursor-pointer shrink-0 transition-colors"
-            >
-              Se Connecter
-            </button>
-          </div>
-        )}
 
         {/* Main View Container */}
         <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-6 pb-24 lg:pb-12">
