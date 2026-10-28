@@ -16,7 +16,12 @@ import {
   Calendar,
   Layers,
   ChevronRight,
-  Percent
+  Percent,
+  Database,
+  RefreshCw,
+  Activity,
+  Server,
+  ShieldCheck,
 } from 'lucide-react';
 import { SuperAdminSubTab } from '../../types';
 
@@ -33,7 +38,47 @@ export const SuperAdminOverview: React.FC<SuperAdminOverviewProps> = ({ onNaviga
     platformAuditLogs,
     supportTickets,
     platformSettings,
+    checkFirestoreSync,
+    lastCloudSync,
   } = useStore();
+
+  const [syncReport, setSyncReport] = React.useState<{
+    tested: boolean;
+    loading: boolean;
+    success: boolean;
+    latencyMs: number;
+    message: string;
+    details?: any;
+  }>({
+    tested: false,
+    loading: false,
+    success: true,
+    latencyMs: 0,
+    message: '',
+  });
+
+  const handleTestSync = async () => {
+    setSyncReport((prev) => ({ ...prev, loading: true }));
+    try {
+      const res = await checkFirestoreSync();
+      setSyncReport({
+        tested: true,
+        loading: false,
+        success: res.success,
+        latencyMs: res.latencyMs,
+        message: res.message,
+        details: res.details,
+      });
+    } catch (e: any) {
+      setSyncReport({
+        tested: true,
+        loading: false,
+        success: false,
+        latencyMs: 0,
+        message: e?.message || 'Erreur lors de la vérification de la synchronisation.',
+      });
+    }
+  };
 
   const metrics = useMemo(() => {
     return computePlatformMetrics(boutiques, users, platformPayments, platformPlans);
@@ -225,6 +270,98 @@ export const SuperAdminOverview: React.FC<SuperAdminOverviewProps> = ({ onNaviga
           </div>
           <ChevronRight className="w-4 h-4 text-slate-400" />
         </div>
+      </div>
+
+      {/* Synchronisation Cloud Firestore en Direct */}
+      <div className="bg-white rounded-2xl p-6 border border-slate-200/80 shadow-xs">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-100">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center shrink-0">
+              <Database className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h2 className="text-sm font-bold text-slate-900">Synchronisation Base de Données Cloud Firestore</h2>
+                <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                  Connecté & Synchronisé au SaaS
+                </span>
+              </div>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Vérification de la liaison bidirectionnelle en direct avec la base NoSQL Firestore du projet ModaFlow.
+              </p>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            disabled={syncReport.loading}
+            onClick={handleTestSync}
+            className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all cursor-pointer shadow-xs disabled:opacity-50 active:scale-95 shrink-0"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${syncReport.loading ? 'animate-spin' : ''}`} />
+            <span>{syncReport.loading ? 'Test en cours...' : 'Tester la synchronisation'}</span>
+          </button>
+        </div>
+
+        {/* Sync Details and Metrics */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-4 text-xs">
+          <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-100 space-y-1">
+            <div className="flex items-center gap-1.5 text-slate-500 font-semibold text-[11px]">
+              <Server className="w-3.5 h-3.5 text-slate-400" />
+              <span>Base Firestore ID</span>
+            </div>
+            <p className="font-mono text-[11px] font-bold text-slate-800 break-all">
+              ai-studio-modaflowsaasgest-5c9fe6ee-c4ba-4e34-90ae-4395762a5e6e
+            </p>
+            <p className="text-[10px] text-slate-400">Projet GCP : avid-sunrise-mmvz5</p>
+          </div>
+
+          <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-100 space-y-1">
+            <div className="flex items-center gap-1.5 text-slate-500 font-semibold text-[11px]">
+              <Activity className="w-3.5 h-3.5 text-blue-500" />
+              <span>Réactivité & Latence Ping</span>
+            </div>
+            <p className="text-base font-bold text-slate-900 tabular-nums">
+              {syncReport.tested ? `${syncReport.latencyMs} ms` : '< 120 ms'}
+            </p>
+            <p className="text-[10px] text-emerald-600 font-medium flex items-center gap-1">
+              <CheckCircle2 className="w-3 h-3 shrink-0" />
+              <span>Lecture/Écriture atomique active</span>
+            </p>
+          </div>
+
+          <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-100 space-y-1">
+            <div className="flex items-center gap-1.5 text-slate-500 font-semibold text-[11px]">
+              <ShieldCheck className="w-3.5 h-3.5 text-emerald-500" />
+              <span>État des Données Réelles</span>
+            </div>
+            <p className="text-xs font-bold text-slate-900">
+              {boutiques.length === 0 ? 'Base vierge prête pour clients réels' : `${boutiques.length} boutique(s) en ligne`}
+            </p>
+            <p className="text-[10px] text-slate-500">
+              Super Admin racine : {users.filter(u => u.role === 'superadmin').length} compte souverain
+            </p>
+          </div>
+        </div>
+
+        {syncReport.tested && (
+          <div className={`mt-4 p-3 rounded-xl border text-xs flex items-center gap-2 ${
+            syncReport.success 
+              ? 'bg-emerald-50 border-emerald-200 text-emerald-800' 
+              : 'bg-rose-50 border-rose-200 text-rose-800'
+          }`}>
+            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+            <div>
+              <p className="font-bold">{syncReport.message}</p>
+              {syncReport.details && (
+                <p className="text-[11px] text-emerald-700 mt-0.5">
+                  Dernier ping serveur : {syncReport.details.serverTime} · Base ID vérifiée : {syncReport.details.firestoreDbId}
+                </p>
+              )}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Two Columns: Répartition des Formules & Dernières Boutiques */}

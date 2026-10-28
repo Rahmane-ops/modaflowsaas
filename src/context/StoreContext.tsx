@@ -34,6 +34,7 @@ import {
   INITIAL_STORE_MEMBERS,
   INITIAL_TRANSACTIONS,
   INITIAL_USERS,
+  SUPER_ADMIN_USER,
   SUBSCRIPTION_PLANS,
 } from '../data/initialData';
 import {
@@ -103,6 +104,8 @@ import {
   saveUserProfileToFirestore,
   getUserProfileFromFirestore,
   deleteUserProfileFromFirestore,
+  deleteBoutiqueFromFirestore,
+  verifyFirestoreSyncConnection,
 } from '../services/firestoreService';
 
 interface CartItem extends OrderItem {}
@@ -363,6 +366,23 @@ interface StoreContextType {
   replyToSupportTicket: (ticketId: string, replyMessage: string) => Promise<void>;
   createSupportTicket: (ticketData: Omit<SupportTicket, 'id' | 'ticketNumber' | 'createdAt' | 'updatedAt' | 'replies'>) => Promise<SupportTicket>;
   logSuperAdminAction: (action: string, resource: PlatformAuditLog['resource'], resourceId?: string, details?: string, reason?: string) => Promise<void>;
+  deleteBoutique: (boutiqueId: string) => Promise<{ success: boolean; message: string }>;
+  resetAllDemoDataAndKeepSuperAdmin: () => Promise<{ success: boolean; message: string }>;
+  checkFirestoreSync: () => Promise<{
+    success: boolean;
+    message: string;
+    latencyMs: number;
+    details: {
+      firestoreDbId: string;
+      online: boolean;
+      totalClothesCount: number;
+      totalOrdersCount: number;
+      totalClientsCount: number;
+      totalTransactionsCount: number;
+      boutiquesCount: number;
+      serverTime: string;
+    };
+  }>;
 }
 
 const StoreContext = createContext<StoreContextType | undefined>(undefined);
@@ -375,21 +395,21 @@ const STORAGE_KEYS = {
   HAS_VISITED: 'modaflow_has_visited',
 };
 
-// Default fallback Boutique if none exists in Firestore
-const DEFAULT_INITIAL_BOUTIQUE: BoutiqueTenant = {
-  id: 'btq-principal',
-  name: 'ModaFlow Boutique',
+// Default clean empty Boutique if none exists in Firestore
+const EMPTY_DEFAULT_BOUTIQUE: BoutiqueTenant = {
+  id: '',
+  name: 'Aucune boutique configurée',
   city: 'Dakar',
   country: 'Sénégal',
-  phone: '+221 77 654 32 10',
+  phone: '',
   currency: 'FCFA',
-  planId: 'pro',
+  planId: 'starter',
   subscriptionStatus: 'actif',
-  subscriptionExpiresAt: '2026-12-31',
-  daysRemaining: 72,
-  autoRenew: true,
-  createdAt: '2026-01-15',
-  ownerId: 'user-owner',
+  subscriptionExpiresAt: '',
+  daysRemaining: 0,
+  autoRenew: false,
+  createdAt: '',
+  ownerId: '',
 };
 
 export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -434,19 +454,26 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     return localStorage.getItem(STORAGE_KEYS.LOGGED_IN) === 'true';
   });
 
-  // Current User Profile & Persistence
+  // Current User Profile & Persistence (Real users only, Super Admin as sovereign seed)
   const [users, setUsers] = useState<UserAccount[]>(() => {
     try {
       const saved = localStorage.getItem('modaflow_custom_users');
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          const ids = new Set(parsed.map((u: any) => u.id));
-          return [...parsed, ...INITIAL_USERS.filter((u) => !ids.has(u.id))];
+          const demoUserIds = new Set([
+            'user-owner', 'user-admin', 'user-seller', 'user-cashier',
+            'user-stock', 'user-delivery', 'user-tailor', 'user-accountant'
+          ]);
+          const realUsers = parsed.filter((u: any) => !demoUserIds.has(u.id));
+          if (!realUsers.some((u: any) => u.email === 'abdourahmanebathily1@gmail.com')) {
+            realUsers.unshift(SUPER_ADMIN_USER);
+          }
+          return realUsers;
         }
       }
     } catch {}
-    return INITIAL_USERS;
+    return [SUPER_ADMIN_USER];
   });
 
   const [currentUser, setCurrentUserState] = useState<UserAccount>(() => {
@@ -454,42 +481,44 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       const savedUserId = localStorage.getItem(STORAGE_KEYS.CURRENT_USER_ID);
       if (savedUserId) {
         const savedUsersRaw = localStorage.getItem('modaflow_custom_users');
-        const allUsers: UserAccount[] = savedUsersRaw ? JSON.parse(savedUsersRaw) : INITIAL_USERS;
+        const allUsers: UserAccount[] = savedUsersRaw ? JSON.parse(savedUsersRaw) : [SUPER_ADMIN_USER];
         const match = allUsers.find((u) => u.id === savedUserId);
         if (match) return match;
       }
     } catch {}
-    return INITIAL_USERS[0];
+    return SUPER_ADMIN_USER;
   });
 
-  // Boutiques (Tenants) & Persistence
+  // Boutiques (Tenants) & Persistence - Starts completely empty of demo data
   const [boutiques, setBoutiques] = useState<BoutiqueTenant[]>(() => {
     try {
       const saved = localStorage.getItem('modaflow_custom_boutiques');
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          return parsed;
+        if (Array.isArray(parsed)) {
+          return parsed.filter(
+            (b: BoutiqueTenant) => b.id !== 'btq-1' && b.id !== 'btq-2' && b.id !== 'btq-principal'
+          );
         }
       }
     } catch {}
-    return [DEFAULT_INITIAL_BOUTIQUE];
+    return [];
   });
 
   const [currentBoutique, setCurrentBoutiqueState] = useState<BoutiqueTenant>(() => {
     try {
       const savedBtqId = localStorage.getItem(STORAGE_KEYS.CURRENT_BOUTIQUE_ID);
-      if (savedBtqId) {
+      if (savedBtqId && savedBtqId !== 'btq-principal' && savedBtqId !== 'btq-1' && savedBtqId !== 'btq-2') {
         const savedBtqsRaw = localStorage.getItem('modaflow_custom_boutiques');
-        const allBtqs: BoutiqueTenant[] = savedBtqsRaw ? JSON.parse(savedBtqsRaw) : [DEFAULT_INITIAL_BOUTIQUE];
+        const allBtqs: BoutiqueTenant[] = savedBtqsRaw ? JSON.parse(savedBtqsRaw) : [];
         const match = allBtqs.find((b) => b.id === savedBtqId);
         if (match) return match;
       }
     } catch {}
-    return DEFAULT_INITIAL_BOUTIQUE;
+    return EMPTY_DEFAULT_BOUTIQUE;
   });
 
-  // Core Business Entities (Managed in Cloud Firestore for authenticated users)
+  // Real data arrays starting from zero
   const [clothes, setClothes] = useState<ClothingItem[]>(() => INITIAL_CLOTHES);
   const [orders, setOrders] = useState<Order[]>(() => INITIAL_ORDERS);
   const [clients, setClients] = useState<Client[]>(() => INITIAL_CLIENTS);
@@ -498,6 +527,51 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [cashRegisterClosings, setCashRegisterClosings] = useState<CashRegisterClosing[]>(() => INITIAL_CASH_CLOSINGS);
   const [storeMembers, setStoreMembers] = useState<StoreMember[]>(INITIAL_STORE_MEMBERS);
   const [invitations, setInvitations] = useState<StoreInvitation[]>(INITIAL_INVITATIONS);
+
+  // Auto-cleanup migration: Purge old demo boutiques & fake users from browser localStorage
+  useEffect(() => {
+    try {
+      const savedBtqs = localStorage.getItem('modaflow_custom_boutiques');
+      if (savedBtqs) {
+        const parsed: BoutiqueTenant[] = JSON.parse(savedBtqs);
+        if (Array.isArray(parsed)) {
+          const cleaned = parsed.filter(
+            (b) => b.id !== 'btq-1' && b.id !== 'btq-2' && b.id !== 'btq-principal'
+          );
+          if (cleaned.length !== parsed.length) {
+            localStorage.setItem('modaflow_custom_boutiques', JSON.stringify(cleaned));
+            setBoutiques(cleaned);
+            if (cleaned.length > 0) {
+              setCurrentBoutiqueState(cleaned[0]);
+              localStorage.setItem(STORAGE_KEYS.CURRENT_BOUTIQUE_ID, cleaned[0].id);
+            } else {
+              setCurrentBoutiqueState(EMPTY_DEFAULT_BOUTIQUE);
+              localStorage.removeItem(STORAGE_KEYS.CURRENT_BOUTIQUE_ID);
+            }
+          }
+        }
+      }
+
+      const savedUsers = localStorage.getItem('modaflow_custom_users');
+      if (savedUsers) {
+        const parsedUsers: UserAccount[] = JSON.parse(savedUsers);
+        if (Array.isArray(parsedUsers)) {
+          const demoUserIds = new Set([
+            'user-owner', 'user-admin', 'user-seller', 'user-cashier',
+            'user-stock', 'user-delivery', 'user-tailor', 'user-accountant'
+          ]);
+          const cleanedUsers = parsedUsers.filter((u) => !demoUserIds.has(u.id));
+          if (cleanedUsers.length !== parsedUsers.length) {
+            const finalUsers = cleanedUsers.length > 0 ? cleanedUsers : [SUPER_ADMIN_USER];
+            localStorage.setItem('modaflow_custom_users', JSON.stringify(finalUsers));
+            setUsers(finalUsers);
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('Erreur purge migration démo:', e);
+    }
+  }, []);
 
   // Cart & UI Modal States
   const [cart, setCart] = useState<CartItem[]>([]);
@@ -699,18 +773,29 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       firebaseUser.uid,
       firebaseUser.email,
       (fetchedBoutiques) => {
-        if (fetchedBoutiques.length > 0) {
-          setBoutiques(fetchedBoutiques);
-          // If current boutique is not in the list, set to first
-          if (!fetchedBoutiques.some((b) => b.id === currentBoutique.id)) {
-            setCurrentBoutiqueState(fetchedBoutiques[0]);
+        // Exclure rigoureusement les boutiques démo 'btq-1', 'btq-2', 'btq-principal'
+        const realBoutiques = fetchedBoutiques.filter(
+          (b) => b.id !== 'btq-1' && b.id !== 'btq-2' && b.id !== 'btq-principal'
+        );
+        setBoutiques(realBoutiques);
+        try {
+          localStorage.setItem('modaflow_custom_boutiques', JSON.stringify(realBoutiques));
+        } catch {}
+
+        if (realBoutiques.length > 0) {
+          if (!realBoutiques.some((b) => b.id === currentBoutique.id)) {
+            setCurrentBoutiqueState(realBoutiques[0]);
+            localStorage.setItem(STORAGE_KEYS.CURRENT_BOUTIQUE_ID, realBoutiques[0].id);
           }
+        } else {
+          setCurrentBoutiqueState(EMPTY_DEFAULT_BOUTIQUE);
+          localStorage.removeItem(STORAGE_KEYS.CURRENT_BOUTIQUE_ID);
         }
       }
     );
 
     return () => unsubBoutiques();
-  }, [firebaseUser, isFirebaseLoading]);
+  }, [firebaseUser, isFirebaseLoading, currentBoutique.id]);
 
   useEffect(() => {
     // ONLY attach onSnapshot listeners if auth is ready and user is authenticated
@@ -2742,6 +2827,141 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     };
   };
 
+  const deleteBoutique = async (boutiqueId: string) => {
+    if (!isSuperAdmin) {
+      throw new Error("PERMISSION_DENIED : Seul le Super Admin peut supprimer une boutique.");
+    }
+    const target = boutiques.find((b) => b.id === boutiqueId);
+    const remaining = boutiques.filter((b) => b.id !== boutiqueId);
+    setBoutiques(remaining);
+    try {
+      localStorage.setItem('modaflow_custom_boutiques', JSON.stringify(remaining));
+    } catch {}
+
+    if (currentBoutique.id === boutiqueId) {
+      const nextCurrent = remaining[0] || EMPTY_DEFAULT_BOUTIQUE;
+      setCurrentBoutiqueState(nextCurrent);
+      if (nextCurrent.id) {
+        localStorage.setItem(STORAGE_KEYS.CURRENT_BOUTIQUE_ID, nextCurrent.id);
+      } else {
+        localStorage.removeItem(STORAGE_KEYS.CURRENT_BOUTIQUE_ID);
+      }
+    }
+
+    try {
+      await deleteBoutiqueFromFirestore(boutiqueId);
+    } catch (fsErr) {
+      console.warn('[Firestore] Erreur suppression boutique:', fsErr);
+    }
+
+    await logSuperAdminAction(
+      'Suppression boutique',
+      'boutique',
+      boutiqueId,
+      `Boutique '${target?.name || boutiqueId}' supprimée de la plateforme.`
+    );
+
+    return {
+      success: true,
+      message: `La boutique '${target?.name || boutiqueId}' a été supprimée avec succès.`,
+    };
+  };
+
+  const resetAllDemoDataAndKeepSuperAdmin = async () => {
+    if (!isSuperAdmin) {
+      throw new Error("PERMISSION_DENIED : Seul le Super Admin peut réinitialiser la plateforme.");
+    }
+
+    // 1. Delete all demo boutiques from Firestore
+    for (const b of boutiques) {
+      if (b.id === 'btq-1' || b.id === 'btq-2' || b.id === 'btq-principal' || b.name.includes('Atelier') || b.name.includes('Wax Abidjan')) {
+        try {
+          await deleteBoutiqueFromFirestore(b.id);
+        } catch {}
+      }
+    }
+
+    // Purge boutiques state
+    const realBoutiques = boutiques.filter(
+      (b) => b.id !== 'btq-1' && b.id !== 'btq-2' && b.id !== 'btq-principal' && !b.name.includes('Atelier') && !b.name.includes('Wax Abidjan')
+    );
+    setBoutiques(realBoutiques);
+    try {
+      localStorage.setItem('modaflow_custom_boutiques', JSON.stringify(realBoutiques));
+    } catch {}
+
+    if (realBoutiques.length > 0) {
+      setCurrentBoutiqueState(realBoutiques[0]);
+      localStorage.setItem(STORAGE_KEYS.CURRENT_BOUTIQUE_ID, realBoutiques[0].id);
+    } else {
+      setCurrentBoutiqueState(EMPTY_DEFAULT_BOUTIQUE);
+      localStorage.removeItem(STORAGE_KEYS.CURRENT_BOUTIQUE_ID);
+    }
+
+    // 2. Keep ONLY the Super Admin account in users
+    const onlySuperAdmin = [SUPER_ADMIN_USER];
+    setUsers(onlySuperAdmin);
+    try {
+      localStorage.setItem('modaflow_custom_users', JSON.stringify(onlySuperAdmin));
+      const creds = JSON.parse(localStorage.getItem('modaflow_registered_credentials') || '{}');
+      const cleanCreds: Record<string, any> = {};
+      if (creds['abdourahmanebathily1@gmail.com']) {
+        cleanCreds['abdourahmanebathily1@gmail.com'] = creds['abdourahmanebathily1@gmail.com'];
+      }
+      localStorage.setItem('modaflow_registered_credentials', JSON.stringify(cleanCreds));
+    } catch {}
+
+    // 3. Reset all operational state to zero
+    setClothes([]);
+    setOrders([]);
+    setClients([]);
+    setTransactions([]);
+    setAuditLogs([]);
+    setCashRegisterClosings([]);
+    setStoreMembers([]);
+    setInvitations([]);
+    setCart([]);
+    setPlatformPayments([]);
+    setSupportTickets([]);
+
+    await logSuperAdminAction(
+      'Remise à zéro complète (Purge démo)',
+      'settings',
+      'system',
+      'Suppression des boutiques démo, remise à zéro des données et préservation exclusive du compte Super Admin.'
+    );
+
+    return {
+      success: true,
+      message: 'Toutes les boutiques et données de démo ont été purgées avec succès. Seul le Super Admin est conservé.',
+    };
+  };
+
+  const checkFirestoreSync = async () => {
+    setIsSyncing(true);
+    try {
+      const report = await verifyFirestoreSyncConnection();
+      setLastCloudSync(new Date().toLocaleTimeString('fr-FR'));
+      return {
+        success: report.connected,
+        message: report.message,
+        latencyMs: report.latencyMs,
+        details: {
+          firestoreDbId: report.databaseId,
+          online: report.connected,
+          totalClothesCount: report.counts.clothes,
+          totalOrdersCount: report.counts.orders,
+          totalClientsCount: clients.length,
+          totalTransactionsCount: transactions.length,
+          boutiquesCount: report.counts.boutiques,
+          serverTime: report.timestamp,
+        },
+      };
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
   // --------------------------------------------------------------------------
   // SUPER ADMIN BOUTIQUE INTERVENTION MODE (ACCÈS TOTAL EN CAS DE PROBLÈME)
   // --------------------------------------------------------------------------
@@ -3020,6 +3240,9 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         replyToSupportTicket,
         createSupportTicket,
         logSuperAdminAction,
+        deleteBoutique,
+        resetAllDemoDataAndKeepSuperAdmin,
+        checkFirestoreSync,
       }}
     >
       {children}

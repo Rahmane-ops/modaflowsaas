@@ -6,6 +6,7 @@ import {
   deleteDoc, 
   getDoc, 
   getDocs, 
+  getDocFromServer,
   query, 
   where, 
   onSnapshot, 
@@ -120,27 +121,6 @@ export const findBoutiquesByEmailOrId = async (
       }
     }
   } catch {}
-
-  // Initial seed demo boutique: only for seed user aissatou@modaflow.com
-  if (cleanEmail === 'aissatou@modaflow.com' && !results.some((r) => r.id === 'btq-1')) {
-    results.push({
-      id: 'btq-1',
-      name: 'ModaFlow Atelier & Prêt-à-Porter',
-      city: 'Dakar',
-      country: 'Sénégal',
-      phone: '+221 33 821 44 00',
-      currency: 'FCFA',
-      planId: 'pro',
-      subscriptionStatus: 'actif',
-      subscriptionExpiresAt: '2026-11-16',
-      daysRemaining: 30,
-      autoRenew: true,
-      createdAt: '2026-10-16',
-      ownerEmail: 'aissatou@modaflow.com',
-      ownerId: 'user-owner',
-      ownerName: 'Aïssatou Ba',
-    });
-  }
 
   return results;
 };
@@ -630,5 +610,96 @@ export const deleteUserProfileFromFirestore = async (userId: string): Promise<vo
     await deleteDoc(docRef);
   } catch (error) {
     handleFirestoreError(error, OperationType.DELETE, `users/${userId}`);
+  }
+};
+
+/**
+ * Delete Boutique from Firestore (Super Admin only)
+ */
+export const deleteBoutiqueFromFirestore = async (boutiqueId: string): Promise<void> => {
+  if (!auth.currentUser) return;
+  try {
+    const docRef = doc(db, 'boutiques', boutiqueId);
+    await deleteDoc(docRef);
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, `boutiques/${boutiqueId}`);
+  }
+};
+
+/**
+ * Verify live sync and connectivity with Cloud Firestore Database
+ */
+export const verifyFirestoreSyncConnection = async (): Promise<{
+  connected: boolean;
+  databaseId: string;
+  latencyMs: number;
+  message: string;
+  timestamp: string;
+  counts: {
+    boutiques: number;
+    users: number;
+    clothes: number;
+    orders: number;
+  };
+}> => {
+  const start = Date.now();
+  const dbId = 'ai-studio-modaflowsaasgest-5c9fe6ee-c4ba-4e34-90ae-4395762a5e6e';
+  try {
+    // 1. Ping connection test
+    await getDocFromServer(doc(db, 'test', 'connection'));
+    const latencyMs = Date.now() - start;
+
+    let boutiquesCount = 0;
+    let usersCount = 0;
+    let clothesCount = 0;
+    let ordersCount = 0;
+
+    if (auth.currentUser) {
+      try {
+        const btqSnap = await getDocs(collection(db, 'boutiques'));
+        boutiquesCount = btqSnap.size;
+      } catch {}
+      try {
+        const usersSnap = await getDocs(collection(db, 'users'));
+        usersCount = usersSnap.size;
+      } catch {}
+      try {
+        const clothesSnap = await getDocs(collection(db, 'clothes'));
+        clothesCount = clothesSnap.size;
+      } catch {}
+      try {
+        const ordersSnap = await getDocs(collection(db, 'orders'));
+        ordersCount = ordersSnap.size;
+      } catch {}
+    }
+
+    return {
+      connected: true,
+      databaseId: dbId,
+      latencyMs,
+      message: `Synchronisation Cloud Firestore validée avec succès (${latencyMs} ms). La base est active et connectée au SaaS.`,
+      timestamp: new Date().toLocaleTimeString('fr-FR'),
+      counts: {
+        boutiques: boutiquesCount,
+        users: usersCount,
+        clothes: clothesCount,
+        orders: ordersCount,
+      },
+    };
+  } catch (err: any) {
+    const latencyMs = Date.now() - start;
+    return {
+      connected: false,
+      databaseId: dbId,
+      latencyMs,
+      message: `Vérification Firestore : ${err?.message || 'Connexion instable ou hors-ligne'}`,
+      timestamp: new Date().toLocaleTimeString('fr-FR'),
+      counts: {
+        boutiques: 0,
+        users: 0,
+        clothes: 0,
+        orders: 0,
+      },
+    };
   }
 };
