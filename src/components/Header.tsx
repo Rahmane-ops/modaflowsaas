@@ -11,6 +11,7 @@ import {
   CheckCircle2
 } from 'lucide-react';
 import { ActiveTab } from '../types';
+import { PWAInstallButton } from './pwa/PWAInstallButton';
 
 interface HeaderProps {
   onOpenMobileMenu: () => void;
@@ -148,6 +149,9 @@ export const Header: React.FC<HeaderProps> = ({
             <ShieldCheck className="w-3.5 h-3.5 text-slate-600" />
             <span>{isLoggedIn ? 'Connexion' : 'Se Connecter'}</span>
           </button>
+
+          {/* PWA Install Button */}
+          <PWAInstallButton variant="header" />
 
           {/* Primary Action Button: Caisse / Panier (Electric Blue Accent) */}
           <button

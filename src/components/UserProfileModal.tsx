@@ -17,6 +17,7 @@ import {
   Phone, 
   Sparkles 
 } from 'lucide-react';
+import { PWAInstallButton } from './pwa/PWAInstallButton';
 
 interface UserProfileModalProps {
   isOpen: boolean;
@@ -333,6 +334,14 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({ isOpen, onCl
                     />
                   </div>
                 </div>
+              </div>
+
+              {/* Application Mobile & Bureau (PWA) */}
+              <div className="pt-2">
+                <p className="text-xs font-semibold text-neutral-700 mb-2">
+                  Application Mobile & Ordinateur (PWA)
+                </p>
+                <PWAInstallButton variant="profile" />
               </div>
 
               <div className="pt-4 border-t border-neutral-100 flex justify-end">

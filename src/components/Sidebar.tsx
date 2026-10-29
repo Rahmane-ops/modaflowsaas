@@ -26,6 +26,7 @@ import {
 import { ActiveTab, UserRole, BoutiqueTenant } from '../types';
 import { ROLE_LABELS } from '../services/securityService';
 import { CreateBoutiqueModal } from './CreateBoutiqueModal';
+import { PWAInstallButton } from './pwa/PWAInstallButton';
 
 interface SidebarProps {
   isOpenMobile?: boolean;
@@ -442,6 +443,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
               </button>
             </div>
           )}
+
+          {/* PWA App Install Button */}
+          <div className="pt-2">
+            <PWAInstallButton variant="sidebar" />
+          </div>
 
         </div>
 

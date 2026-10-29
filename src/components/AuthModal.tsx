@@ -372,6 +372,12 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     setIsRegistering(false);
 
     if (res.success) {
+      try {
+        sessionStorage.setItem('modaflow_show_post_reg_pwa', 'true');
+        window.dispatchEvent(new CustomEvent('modaflow:user-registered'));
+      } catch {
+        // Safe fallback in restricted environments
+      }
       onClose();
     } else {
       setRegError(res.message);

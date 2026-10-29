@@ -22,6 +22,9 @@ import { ExportReportingModal } from './components/ExportReportingModal';
 import { LandingPage } from './components/LandingPage';
 import { Sidebar } from './components/Sidebar';
 import { SuperAdminDashboard } from './components/superadmin/SuperAdminDashboard';
+import { PWAInstallModal } from './components/pwa/PWAInstallModal';
+import { OfflineBanner } from './components/pwa/OfflineBanner';
+import { usePWAInstall } from './hooks/usePWAInstall';
 import { Order } from './types';
 
 const AppContent: React.FC = () => {
@@ -57,6 +60,41 @@ const AppContent: React.FC = () => {
   const [editingOrder, setEditingOrder] = useState<Order | null>(null);
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
   const [exportInitialTab, setExportInitialTab] = useState<'monthly' | 'sales' | 'accounting'>('monthly');
+
+  // PWA Installation state & hooks
+  const { isInstalled, hasDismissedRecently } = usePWAInstall();
+  const [isPWAInstallModalOpen, setIsPWAInstallModalOpen] = useState(false);
+  const [isPostRegistrationPrompt, setIsPostRegistrationPrompt] = useState(false);
+
+  // Invitation PWA élégante après une inscription réussie
+  React.useEffect(() => {
+    if (!isLoggedIn || isInstalled) return;
+
+    const checkPostRegistration = () => {
+      try {
+        const flag = sessionStorage.getItem('modaflow_show_post_reg_pwa');
+        if (flag === 'true' && !hasDismissedRecently()) {
+          sessionStorage.removeItem('modaflow_show_post_reg_pwa');
+          setIsPostRegistrationPrompt(true);
+          const timer = setTimeout(() => {
+            setIsPWAInstallModalOpen(true);
+          }, 800);
+          return () => clearTimeout(timer);
+        }
+      } catch {}
+    };
+
+    checkPostRegistration();
+
+    const handleRegisteredEvent = () => {
+      checkPostRegistration();
+    };
+
+    window.addEventListener('modaflow:user-registered', handleRegisteredEvent);
+    return () => {
+      window.removeEventListener('modaflow:user-registered', handleRegisteredEvent);
+    };
+  }, [isLoggedIn, isInstalled, hasDismissedRecently]);
 
   // Redirection automatique vers la Landing Page de présentation SaaS :
   // Si l'utilisateur n'est pas authentifié et n'a pas encore visité/choisi d'accéder à la boutique,
@@ -130,6 +168,7 @@ const AppContent: React.FC = () => {
   if (isLandingPage) {
     return (
       <>
+        <OfflineBanner />
         <LandingPage
           onOpenAuth={(tab, planId) => openAuthModalWithPlan(planId, tab as any)}
           onEnterDashboard={() => {
@@ -145,6 +184,13 @@ const AppContent: React.FC = () => {
         <AuthModal
           isOpen={authModalOpen}
           onClose={() => setAuthModalOpen(false)}
+        />
+
+        {/* Modal: Invitation PWA après inscription */}
+        <PWAInstallModal
+          isOpen={isPWAInstallModalOpen}
+          onClose={() => setIsPWAInstallModalOpen(false)}
+          isAfterRegistration={isPostRegistrationPrompt}
         />
       </>
     );
@@ -343,6 +389,16 @@ const AppContent: React.FC = () => {
       {isSuperAdminViewOpen && isSuperAdmin && (
         <SuperAdminDashboard onClose={() => setIsSuperAdminViewOpen(false)} />
       )}
+
+      {/* Bannière Hors-Ligne (alerte connexion Firestore requise) */}
+      <OfflineBanner />
+
+      {/* Modal: Invitation & Guide d'installation PWA */}
+      <PWAInstallModal
+        isOpen={isPWAInstallModalOpen}
+        onClose={() => setIsPWAInstallModalOpen(false)}
+        isAfterRegistration={isPostRegistrationPrompt}
+      />
     </div>
   );
 };
