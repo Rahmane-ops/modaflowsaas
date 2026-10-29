@@ -67,6 +67,7 @@ import {
   auth,
   db,
   doc,
+  getDoc,
   setDoc,
   updateDoc,
   googleProvider,
@@ -647,17 +648,38 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         const isAuthorizedOwner = userEmail === 'abdourahmanebathily1@gmail.com';
         console.log('⚡ [Auth Listener] Utilisateur Firebase connecté:', userEmail, '| Souverain SuperAdmin?', isAuthorizedOwner);
 
-        // Vérification stricte : Savoir si l'utilisateur a déjà une boutique par son adresse email ou UID
+        // 1. Vérification dans Firestore : trouver les boutiques par email ou UID
         const userBoutiques = await findBoutiquesByEmailOrId(userEmail, fbUser.uid);
+
+        // 2. Vérifier aussi si le profil utilisateur Firestore a un boutiqueId explicite
+        let userProfile: UserAccount | null = null;
+        try {
+          userProfile = await getUserProfileFromFirestore(fbUser.uid);
+          if (userProfile?.boutiqueId && !userBoutiques.some((b) => b.id === userProfile!.boutiqueId)) {
+            const bDocRef = doc(db, 'boutiques', userProfile.boutiqueId);
+            const bDoc = await getDoc(bDocRef);
+            if (bDoc.exists()) {
+              userBoutiques.push({ ...(bDoc.data() as BoutiqueTenant), id: bDoc.id });
+            }
+          }
+        } catch (profileErr) {
+          console.warn('⚡ [Auth Listener] Erreur lecture profil Firestore:', profileErr);
+        }
+
         const hasBoutique = isAuthorizedOwner || userBoutiques.length > 0;
 
         if (hasBoutique) {
           setIsLoggedIn(true);
           localStorage.setItem(STORAGE_KEYS.LOGGED_IN, 'true');
+          setIsLandingPage(false);
+          localStorage.setItem(STORAGE_KEYS.IS_LANDING, 'false');
           if (userBoutiques.length > 0) {
             setBoutiques(userBoutiques);
             setCurrentBoutiqueState(userBoutiques[0]);
-            localStorage.setItem(STORAGE_KEYS.CURRENT_BOUTIQUE_ID, userBoutiques[0].id);
+            try {
+              localStorage.setItem('modaflow_custom_boutiques', JSON.stringify(userBoutiques));
+              localStorage.setItem(STORAGE_KEYS.CURRENT_BOUTIQUE_ID, userBoutiques[0].id);
+            } catch {}
           }
         } else {
           console.warn('⚡ [Auth Listener] Compte Firebase sans boutique enregistrée pour:', userEmail);
@@ -865,15 +887,23 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
       // 1. Vérification : Savoir si l'utilisateur possède déjà une boutique par son adresse email ou UID
       const userBoutiques = await findBoutiquesByEmailOrId(userEmail, user.uid);
-      const hasBoutique = isSuperAdminEmail || userBoutiques.length > 0;
 
       // Check if user profile exists in Firestore
       let userProfile: UserAccount | null = null;
       try {
         userProfile = await getUserProfileFromFirestore(user.uid);
+        if (userProfile?.boutiqueId && !userBoutiques.some((b) => b.id === userProfile!.boutiqueId)) {
+          const bDocRef = doc(db, 'boutiques', userProfile.boutiqueId);
+          const bDoc = await getDoc(bDocRef);
+          if (bDoc.exists()) {
+            userBoutiques.push({ ...(bDoc.data() as BoutiqueTenant), id: bDoc.id });
+          }
+        }
       } catch (fsErr) {
         console.warn('⚡ [Google Auth] Avertissement consultation Firestore:', fsErr);
       }
+
+      const hasBoutique = isSuperAdminEmail || userBoutiques.length > 0;
 
       // Si l'utilisateur n'a pas encore de boutique, ne pas l'autoriser à entrer dans la boutique démo !
       if (!hasBoutique && !userProfile?.boutiqueId) {
@@ -930,7 +960,10 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       if (userBoutiques.length > 0) {
         setBoutiques(userBoutiques);
         setCurrentBoutiqueState(userBoutiques[0]);
-        localStorage.setItem(STORAGE_KEYS.CURRENT_BOUTIQUE_ID, userBoutiques[0].id);
+        try {
+          localStorage.setItem('modaflow_custom_boutiques', JSON.stringify(userBoutiques));
+          localStorage.setItem(STORAGE_KEYS.CURRENT_BOUTIQUE_ID, userBoutiques[0].id);
+        } catch {}
       }
 
       setCurrentUserState(finalProfile);
@@ -1063,52 +1096,22 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       } catch {}
     }
 
-    // 1. Vérification obligatoire : Savoir si l'utilisateur a déjà une boutique par son adresse email
-    const userBoutiques = await findBoutiquesByEmailOrId(cleanEmail);
     const isSeedOwner = cleanEmail === 'aissatou@modaflow.com';
-    const hasBoutique = userBoutiques.length > 0 || isSeedOwner;
 
-    if (!hasBoutique) {
-      console.warn('⚡ [Email Auth] Aucune boutique associée à cet e-mail:', cleanEmail);
-      return {
-        success: false,
-        needsBoutique: true,
-        email: cleanEmail,
-        message: `Aucune boutique n'est associée à l'adresse e-mail "${cleanEmail}". Vous devez d'abord créer votre boutique (14 jours d'essai gratuit) pour pouvoir vous connecter.`,
-      };
-    }
-
-    // 2. Vérification des identifiants (Mot de passe)
+    // 1. Authentification des identifiants (Firebase Auth en priorité, ou coffre local / seed)
     let authenticatedUser: UserAccount | null = null;
     let authMethodSucceeded = false;
+    let fbUser: User | null = null;
 
     // A. Tentative Firebase Auth
     try {
       const userCred = await signInWithEmailAndPassword(auth, cleanEmail, password);
-      const fbUser = userCred.user;
-      let userProfile = await getUserProfileFromFirestore(fbUser.uid);
-      const finalProfile: UserAccount = userProfile || {
-        id: fbUser.uid,
-        name: fbUser.displayName || cleanEmail.split('@')[0],
-        email: cleanEmail,
-        phone: '+221 77 000 00 00',
-        role: 'owner',
-        title: 'Propriétaire & Fondateur',
-        avatar: '👑',
-        status: 'active',
-        emailVerified: fbUser.emailVerified,
-        createdAt: new Date().toISOString().substring(0, 10),
-        boutiqueId: userBoutiques[0]?.id,
-      };
-      if (!userProfile) {
-        try {
-          await saveUserProfileToFirestore(finalProfile);
-        } catch {}
-      }
-      authenticatedUser = finalProfile;
+      fbUser = userCred.user;
       authMethodSucceeded = true;
     } catch (fbErr: any) {
-      // B. Si Firebase échoue (ex: réseau, compte local créé sans mot de passe Firebase), vérifier le coffre local
+      console.log('⚡ [Firebase Auth Sign-In]', fbErr?.code, fbErr?.message);
+      
+      // B. Si Firebase échoue (ex: compte hors-ligne ou local), vérifier le coffre local
       try {
         const creds = JSON.parse(localStorage.getItem('modaflow_registered_credentials') || '{}');
         const savedCred = creds[cleanEmail];
@@ -1125,7 +1128,6 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
               status: 'active' as const,
               emailVerified: true,
               createdAt: new Date().toISOString().substring(0, 10),
-              boutiqueId: userBoutiques[0]?.id,
               activeSessions: [],
             };
             authMethodSucceeded = true;
@@ -1151,6 +1153,71 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         }
       }
     }
+
+    if (!authMethodSucceeded) {
+      return {
+        success: false,
+        message: 'Identifiants invalides ou mot de passe incorrect. Veuillez vérifier vos accès.',
+      };
+    }
+
+    // 2. L'UTILISATEUR EST MAINTENANT AUTHENTIFIÉ (auth.currentUser est renseigné) !
+    // Nous pouvons interroger Firestore en toute sécurité pour trouver sa boutique réelle synchronisée.
+    const userBoutiques = await findBoutiquesByEmailOrId(cleanEmail, fbUser?.uid);
+    let userProfile: UserAccount | null = null;
+    if (fbUser) {
+      try {
+        userProfile = await getUserProfileFromFirestore(fbUser.uid);
+      } catch (pErr) {
+        console.warn('⚡ [Email Auth] Profil Firestore notice:', pErr);
+      }
+    }
+
+    // Si le profil utilisateur Firestore a un boutiqueId explicite
+    if (userProfile?.boutiqueId && !userBoutiques.some((b) => b.id === userProfile!.boutiqueId)) {
+      try {
+        const bDocRef = doc(db, 'boutiques', userProfile.boutiqueId);
+        const bDoc = await getDoc(bDocRef);
+        if (bDoc.exists()) {
+          userBoutiques.push({ ...(bDoc.data() as BoutiqueTenant), id: bDoc.id });
+        }
+      } catch {}
+    }
+
+    const hasBoutique = userBoutiques.length > 0 || isSeedOwner || isSuperAdminEmail;
+
+    if (!hasBoutique) {
+      console.warn('⚡ [Email Auth] Utilisateur authentifié mais aucune boutique trouvée dans Firestore:', cleanEmail);
+      return {
+        success: false,
+        needsBoutique: true,
+        email: cleanEmail,
+        message: `Votre compte (${cleanEmail}) est valide, mais aucune boutique n'y est encore associée. Veuillez créer votre boutique ci-dessous pour démarrer vos 14 jours d'essai gratuit !`,
+      };
+    }
+
+    // Profil utilisateur final
+    const finalProfile: UserAccount = userProfile || authenticatedUser || {
+      id: fbUser?.uid || `usr-${cleanEmail.replace(/[^a-zA-Z0-9]/g, '_')}`,
+      name: fbUser?.displayName || cleanEmail.split('@')[0],
+      email: cleanEmail,
+      phone: '+221 77 000 00 00',
+      role: 'owner',
+      title: 'Propriétaire & Fondateur',
+      avatar: '👑',
+      status: 'active',
+      emailVerified: fbUser?.emailVerified || true,
+      createdAt: new Date().toISOString().substring(0, 10),
+      boutiqueId: userBoutiques[0]?.id,
+    };
+
+    if (fbUser && !userProfile) {
+      try {
+        await saveUserProfileToFirestore(finalProfile);
+      } catch {}
+    }
+
+    authenticatedUser = finalProfile;
 
     if (!authMethodSucceeded || !authenticatedUser) {
       return {
@@ -1188,11 +1255,13 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       };
     }
 
-    // Connecter l'utilisateur à sa boutique (si 2FA déjà complété)
     if (userBoutiques.length > 0) {
       setBoutiques(userBoutiques);
       setCurrentBoutiqueState(userBoutiques[0]);
-      localStorage.setItem(STORAGE_KEYS.CURRENT_BOUTIQUE_ID, userBoutiques[0].id);
+      try {
+        localStorage.setItem('modaflow_custom_boutiques', JSON.stringify(userBoutiques));
+        localStorage.setItem(STORAGE_KEYS.CURRENT_BOUTIQUE_ID, userBoutiques[0].id);
+      } catch {}
     }
 
     setCurrentUserState(authenticatedUser);
@@ -1223,7 +1292,10 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     if (boutiquesList.length > 0) {
       setBoutiques(boutiquesList);
       setCurrentBoutiqueState(boutiquesList[0]);
-      localStorage.setItem(STORAGE_KEYS.CURRENT_BOUTIQUE_ID, boutiquesList[0].id);
+      try {
+        localStorage.setItem('modaflow_custom_boutiques', JSON.stringify(boutiquesList));
+        localStorage.setItem(STORAGE_KEYS.CURRENT_BOUTIQUE_ID, boutiquesList[0].id);
+      } catch {}
     }
 
     const isSovereignSuper =

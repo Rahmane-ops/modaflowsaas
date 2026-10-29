@@ -95,11 +95,34 @@ export const findBoutiquesByEmailOrId = async (
         const bOwnerId = data.ownerId;
         if (
           (bOwnerEmail && bOwnerEmail === cleanEmail) ||
-          (userId && bOwnerId === userId)
+          (userId && bOwnerId === userId) ||
+          (auth.currentUser?.uid && bOwnerId === auth.currentUser.uid)
         ) {
           results.push({ ...data, id: d.id });
         }
       });
+
+      // Also check if user document in Firestore has a boutiqueId attached
+      const targetUid = userId || auth.currentUser.uid;
+      if (targetUid) {
+        try {
+          const uDocRef = doc(db, 'users', targetUid);
+          const uDoc = await getDoc(uDocRef);
+          if (uDoc.exists()) {
+            const uData = uDoc.data();
+            const bId = uData?.boutiqueId;
+            if (bId && !results.some((r) => r.id === bId)) {
+              const bDocRef = doc(db, 'boutiques', bId);
+              const bDoc = await getDoc(bDocRef);
+              if (bDoc.exists()) {
+                results.push({ ...(bDoc.data() as BoutiqueTenant), id: bDoc.id });
+              }
+            }
+          }
+        } catch (uErr) {
+          console.warn('[findBoutiquesByEmailOrId] User profile boutique lookup notice:', uErr);
+        }
+      }
     } catch (err) {
       console.warn('[findBoutiquesByEmailOrId] Notice Firestore scan:', err);
     }
