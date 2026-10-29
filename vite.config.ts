@@ -54,9 +54,42 @@ export default defineConfig(() => {
         },
         workbox: {
           maximumFileSizeToCacheInBytes: 10 * 1024 * 1024,
-          globPatterns: ['**/*.{js,css,html,ico,png,svg,jpg,jpeg,webp,woff,woff2}'],
+          // Only precache static bundle assets, not HTML pages
+          globPatterns: ['**/*.{js,css,ico,png,svg,jpg,jpeg,webp,woff,woff2}'],
+          cleanupOutdatedCaches: true,
+          skipWaiting: true,
+          clientsClaim: true,
+          navigateFallback: '/index.html',
           navigateFallbackDenylist: [/^\/__/, /^\/api\//],
           runtimeCaching: [
+            // 1. Strictly NEVER cache Firestore, Firebase Auth, or Google API data requests
+            // These always go directly to the live cloud network for real-time fresh data
+            {
+              urlPattern: /^https:\/\/(firestore|identitytoolkit|securetoken|firebaseinstallations|fcm)\.googleapis\.com\/.*/i,
+              handler: 'NetworkOnly',
+            },
+            {
+              urlPattern: /^https:\/\/.*\.firebaseio\.com\/.*/i,
+              handler: 'NetworkOnly',
+            },
+            {
+              urlPattern: /^\/api\/.*/i,
+              handler: 'NetworkOnly',
+            },
+            // 2. Dynamic navigation routes (such as /dashboard, /catalogue, /commandes, etc.)
+            // NetworkFirst strategy: always fetch fresh from network first; only fallback to cached shell if offline
+            {
+              urlPattern: ({ request }) => request.mode === 'navigate',
+              handler: 'NetworkFirst',
+              options: {
+                cacheName: 'modaflow-dynamic-routes-cache',
+                networkTimeoutSeconds: 3,
+                cacheableResponse: {
+                  statuses: [0, 200],
+                },
+              },
+            },
+            // 3. Static Web Fonts: CacheFirst for instant typographic rendering
             {
               urlPattern: /^https:\/\/fonts\.googleapis\.com\/.*/i,
               handler: 'CacheFirst',
