@@ -38,12 +38,10 @@ export const EditOrderModal: React.FC<EditOrderModalProps> = ({
 }) => {
   const { clothes, modifyOrder } = useStore();
 
-  if (!order) return null;
-
   // Local working copy of items
-  const [items, setItems] = useState<OrderItem[]>(order.items);
+  const [items, setItems] = useState<OrderItem[]>(order?.items || []);
   const [returnsList, setReturnsList] = useState<ReturnItemState[]>([]);
-  const [refundPaymentMethod, setRefundPaymentMethod] = useState<PaymentMethod>(order.paymentMethod);
+  const [refundPaymentMethod, setRefundPaymentMethod] = useState<PaymentMethod>(order?.paymentMethod || 'cash');
   const [returnNotes, setReturnNotes] = useState('');
   
   // Exchange article selector
@@ -51,6 +49,8 @@ export const EditOrderModal: React.FC<EditOrderModalProps> = ({
   const [selectedExchangeClothId, setSelectedExchangeClothId] = useState(clothes[0]?.id || '');
   const [selectedExchangeSize, setSelectedExchangeSize] = useState('38');
   const [selectedExchangeQty, setSelectedExchangeQty] = useState(1);
+
+  if (!order) return null;
 
   // Return trigger for a specific item
   const handleInitiateReturn = (item: OrderItem, qtyToReturn: number, reason: string, actionType: 'remboursement' | 'echange' | 'avoir') => {

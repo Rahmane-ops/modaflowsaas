@@ -1,4 +1,4 @@
-import React, { useState, useRef, useMemo } from 'react';
+import React, { useState, useRef } from 'react';
 import { useStore } from '../context/StoreContext';
 import { 
   X, 
@@ -71,8 +71,6 @@ export const NewProductModal: React.FC<NewProductModalProps> = ({
   const [isDragOver, setIsDragOver] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
-
-  if (!isOpen) return null;
 
   const availableImages = [
     { label: 'Robe Soie Émeraude & Or', path: '/src/assets/images/fashion_robe_soie_1792167170521.jpg' },
@@ -200,9 +198,10 @@ export const NewProductModal: React.FC<NewProductModalProps> = ({
   };
 
   // Auto-calculated total stock based on sizes
-  const totalCalculatedStock = useMemo(() => {
-    return sizeStocks.reduce((sum, item) => sum + (Math.max(0, Number(item.stock)) || 0), 0);
-  }, [sizeStocks]);
+  const totalCalculatedStock = sizeStocks.reduce(
+    (sum, item) => sum + (Math.max(0, Number(item.stock)) || 0),
+    0
+  );
 
   const handleToggleStandardSize = (sz: string) => {
     if (sizeStocks.some((item) => item.size === sz)) {
@@ -304,6 +303,8 @@ export const NewProductModal: React.FC<NewProductModalProps> = ({
 
   const isCustomUploaded = selectedImage.startsWith('data:');
   const isExternalUrl = selectedImage.startsWith('http');
+
+  if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
