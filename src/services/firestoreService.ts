@@ -35,7 +35,8 @@ export const subscribeToUserBoutiques = (
   userId: string,
   userEmail: string | null | undefined,
   onUpdate: (boutiques: BoutiqueTenant[]) => void,
-  onError?: (err: any) => void
+  onError?: (err: any) => void,
+  preferredBoutiqueId?: string
 ): Unsubscribe => {
   if (!auth.currentUser) {
     return () => {};
@@ -54,8 +55,13 @@ export const subscribeToUserBoutiques = (
           const data = d.data() as BoutiqueTenant;
           const bOwnerEmail = (data.ownerEmail || '').trim().toLowerCase();
           const bOwnerId = data.ownerId;
-          // Filter: only include boutiques owned by this user or email (superadmin sees all)
-          if (isSuper || bOwnerId === userId || (cleanEmail && bOwnerEmail === cleanEmail)) {
+          // Filter: include boutiques owned by this user or email, or linked via profile (superadmin sees all)
+          if (
+            isSuper || 
+            bOwnerId === userId || 
+            (cleanEmail && bOwnerEmail === cleanEmail) ||
+            (preferredBoutiqueId && d.id === preferredBoutiqueId)
+          ) {
             list.push({ ...data, id: d.id });
           }
         });
@@ -83,52 +89,142 @@ export const findBoutiquesByEmailOrId = async (
 ): Promise<BoutiqueTenant[]> => {
   const cleanEmail = email.trim().toLowerCase();
   const results: BoutiqueTenant[] = [];
+  const addedIds = new Set<string>();
+
+  const addUnique = (b: BoutiqueTenant) => {
+    if (b && b.id && !addedIds.has(b.id)) {
+      addedIds.add(b.id);
+      results.push(b);
+    }
+  };
 
   // Check Cloud Firestore if user is authenticated
   if (auth.currentUser) {
-    try {
-      const boutiquesCol = collection(db, 'boutiques');
-      const snap = await getDocs(boutiquesCol);
-      snap.forEach((d) => {
-        const data = d.data() as BoutiqueTenant;
-        const bOwnerEmail = (data.ownerEmail || '').trim().toLowerCase();
-        const bOwnerId = data.ownerId;
-        if (
-          (bOwnerEmail && bOwnerEmail === cleanEmail) ||
-          (userId && bOwnerId === userId) ||
-          (auth.currentUser?.uid && bOwnerId === auth.currentUser.uid)
-        ) {
-          results.push({ ...data, id: d.id });
-        }
-      });
+    const targetUid = userId || auth.currentUser.uid;
 
-      // Also check if user document in Firestore has a boutiqueId attached
-      const targetUid = userId || auth.currentUser.uid;
-      if (targetUid) {
-        try {
-          const uDocRef = doc(db, 'users', targetUid);
-          const uDoc = await getDoc(uDocRef);
-          if (uDoc.exists()) {
-            const uData = uDoc.data();
-            const bId = uData?.boutiqueId;
-            if (bId && !results.some((r) => r.id === bId)) {
+    // Tier 1: Check direct User Profile Document in Firestore
+    if (targetUid) {
+      try {
+        const uDocRef = doc(db, 'users', targetUid);
+        const uDoc = await getDoc(uDocRef);
+        if (uDoc.exists()) {
+          const uData = uDoc.data();
+          const bId = uData?.boutiqueId;
+          if (bId) {
+            try {
               const bDocRef = doc(db, 'boutiques', bId);
               const bDoc = await getDoc(bDocRef);
               if (bDoc.exists()) {
-                results.push({ ...(bDoc.data() as BoutiqueTenant), id: bDoc.id });
+                addUnique({ ...(bDoc.data() as BoutiqueTenant), id: bDoc.id });
               }
+            } catch (bErr) {
+              console.warn('[findBoutiquesByEmailOrId] Direct boutique fetch notice:', bErr);
             }
           }
-        } catch (uErr) {
-          console.warn('[findBoutiquesByEmailOrId] User profile boutique lookup notice:', uErr);
         }
+      } catch (uErr) {
+        console.warn('[findBoutiquesByEmailOrId] User profile lookup notice:', uErr);
       }
-    } catch (err) {
-      console.warn('[findBoutiquesByEmailOrId] Notice Firestore scan:', err);
+    }
+
+    // Tier 2: Query boutiques collection by ownerId
+    if (targetUid) {
+      try {
+        const bCol = collection(db, 'boutiques');
+        const qOwnerId = query(bCol, where('ownerId', '==', targetUid));
+        const snapOwner = await getDocs(qOwnerId);
+        snapOwner.forEach((d) => {
+          addUnique({ ...(d.data() as BoutiqueTenant), id: d.id });
+        });
+      } catch (qErr) {
+        console.warn('[findBoutiquesByEmailOrId] Query by ownerId notice:', qErr);
+      }
+    }
+
+    // Tier 3: Query boutiques collection by ownerEmail
+    if (cleanEmail) {
+      try {
+        const bCol = collection(db, 'boutiques');
+        const qOwnerEmail = query(bCol, where('ownerEmail', '==', cleanEmail));
+        const snapEmail = await getDocs(qOwnerEmail);
+        snapEmail.forEach((d) => {
+          addUnique({ ...(d.data() as BoutiqueTenant), id: d.id });
+        });
+      } catch (qErr) {
+        console.warn('[findBoutiquesByEmailOrId] Query by ownerEmail notice:', qErr);
+      }
+    }
+
+    // Tier 4: Query users collection by email to find linked boutiqueId
+    if (results.length === 0 && cleanEmail) {
+      try {
+        const uCol = collection(db, 'users');
+        const qUsers = query(uCol, where('email', '==', cleanEmail));
+        const snapUsers = await getDocs(qUsers);
+        for (const uDoc of snapUsers.docs) {
+          const bId = uDoc.data()?.boutiqueId;
+          if (bId) {
+            try {
+              const bDoc = await getDoc(doc(db, 'boutiques', bId));
+              if (bDoc.exists()) {
+                addUnique({ ...(bDoc.data() as BoutiqueTenant), id: bDoc.id });
+              }
+            } catch {}
+          }
+        }
+      } catch (uQErr) {
+        console.warn('[findBoutiquesByEmailOrId] Query users by email notice:', uQErr);
+      }
+    }
+
+    // Tier 5: Query store_members collection by email or userId
+    if (results.length === 0 && (cleanEmail || targetUid)) {
+      try {
+        const mCol = collection(db, 'store_members');
+        const qMembers = cleanEmail 
+          ? query(mCol, where('email', '==', cleanEmail))
+          : query(mCol, where('userId', '==', targetUid));
+        const snapMembers = await getDocs(qMembers);
+        for (const mDoc of snapMembers.docs) {
+          const storeId = mDoc.data()?.storeId;
+          if (storeId) {
+            try {
+              const bDoc = await getDoc(doc(db, 'boutiques', storeId));
+              if (bDoc.exists()) {
+                addUnique({ ...(bDoc.data() as BoutiqueTenant), id: bDoc.id });
+              }
+            } catch {}
+          }
+        }
+      } catch (mErr) {
+        console.warn('[findBoutiquesByEmailOrId] Query store_members notice:', mErr);
+      }
+    }
+
+    // Tier 6: Full collection scan fallback if still empty
+    if (results.length === 0) {
+      try {
+        const boutiquesCol = collection(db, 'boutiques');
+        const snap = await getDocs(boutiquesCol);
+        snap.forEach((d) => {
+          const data = d.data() as BoutiqueTenant;
+          const bOwnerEmail = (data.ownerEmail || '').trim().toLowerCase();
+          const bOwnerId = data.ownerId;
+          if (
+            (bOwnerEmail && bOwnerEmail === cleanEmail) ||
+            (targetUid && bOwnerId === targetUid) ||
+            (auth.currentUser?.uid && bOwnerId === auth.currentUser.uid)
+          ) {
+            addUnique({ ...data, id: d.id });
+          }
+        });
+      } catch (scanErr) {
+        console.warn('[findBoutiquesByEmailOrId] Notice Firestore scan:', scanErr);
+      }
     }
   }
 
-  // Also check local storage custom boutiques
+  // Tier 7: Also check local storage custom boutiques if present
   try {
     const localRaw = localStorage.getItem('modaflow_custom_boutiques');
     if (localRaw) {
@@ -137,9 +233,9 @@ export const findBoutiquesByEmailOrId = async (
         const bEmail = (b.ownerEmail || '').trim().toLowerCase();
         if (
           ((bEmail && bEmail === cleanEmail) || (userId && b.ownerId === userId)) &&
-          !results.some((r) => r.id === b.id)
+          !addedIds.has(b.id)
         ) {
-          results.push(b);
+          addUnique(b);
         }
       }
     }

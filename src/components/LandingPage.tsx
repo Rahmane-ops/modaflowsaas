@@ -22,7 +22,6 @@ import {
   MessageCircle,
   ExternalLink,
   Laptop,
-  PlayCircle,
   Heart,
   Store,
   Shield,
@@ -174,18 +173,13 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onOpenAuth, onEnterDas
               alt="ModaFlow Logo"
               className="w-10 h-10 rounded-2xl object-cover shadow-sm hover:scale-105 transition-transform"
             />
-            <div>
-              <div className="flex items-center gap-2">
-                <span className="text-xl font-black tracking-tight text-neutral-950 font-sans">
-                  ModaFlow
-                </span>
-                <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-neutral-100 text-neutral-700">
-                  SaaS Mode
-                </span>
-              </div>
-              <p className="text-xs text-neutral-500 font-medium hidden sm:block">
-                Logiciel de gestion de boutique facile & épuré
-              </p>
+            <div className="flex items-center gap-2">
+              <span className="text-xl font-black tracking-tight text-neutral-950 font-sans">
+                ModaFlow
+              </span>
+              <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-neutral-100 text-neutral-700">
+                SaaS Mode
+              </span>
             </div>
           </div>
 
@@ -259,7 +253,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onOpenAuth, onEnterDas
           Finis les cahiers perdus et les erreurs de calcul. Enregistrez vos ventes en 10 secondes, partagez le reçu sur WhatsApp, gérez vos stocks et suivez vos encaissements <span className="font-bold text-slate-900">Wave, Orange Money & Espèces</span>.
         </p>
 
-        {/* Big Obvious Action Buttons - Avec bouton CRÉER MA BOUTIQUE proéminent */}
+        {/* Big Obvious Action Button - Bouton CRÉER MA BOUTIQUE proéminent */}
         <div className="flex flex-col sm:flex-row items-center justify-center gap-3.5 mb-10">
           <button
             onClick={() => handleOpenCreateBoutique('pro')}
@@ -268,14 +262,6 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onOpenAuth, onEnterDas
             <Store className="w-5 h-5 text-blue-100 group-hover:scale-105 transition-transform" />
             <span>Créer ma boutique</span>
             <ArrowRight className="w-4 h-4 text-white group-hover:translate-x-0.5 transition-transform" />
-          </button>
-
-          <button
-            onClick={onEnterDashboard}
-            className="w-full sm:w-auto px-6 py-3.5 bg-white hover:bg-slate-50 text-slate-800 font-semibold text-sm rounded-xl border border-slate-200 transition-all flex items-center justify-center gap-2 cursor-pointer shadow-2xs"
-          >
-            <PlayCircle className="w-4 h-4 text-slate-500" />
-            <span>Tester la démo en direct</span>
           </button>
         </div>
 
@@ -548,15 +534,15 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onOpenAuth, onEnterDas
               </p>
               <div className="flex items-center justify-center gap-3 pt-2">
                 <button 
-                  onClick={onEnterDashboard}
-                  className="px-4 py-2 bg-emerald-600 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-xs"
+                  onClick={() => handleOpenCreateBoutique('pro')}
+                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-xs transition-colors cursor-pointer"
                 >
                   <MessageCircle className="w-4 h-4" />
                   <span>Envoyer sur WhatsApp</span>
                 </button>
                 <button 
-                  onClick={onEnterDashboard}
-                  className="px-4 py-2 bg-neutral-100 text-neutral-800 rounded-xl text-xs font-bold flex items-center gap-1.5"
+                  onClick={() => handleOpenCreateBoutique('pro')}
+                  className="px-4 py-2 bg-neutral-100 hover:bg-neutral-200 text-neutral-800 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
                 >
                   <FileText className="w-4 h-4" />
                   <span>Imprimer le Ticket</span>
@@ -819,12 +805,6 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onOpenAuth, onEnterDas
             <span>Créer ma boutique</span>
             <ArrowRight className="w-4 h-4 text-white" />
           </button>
-          <button
-            onClick={onEnterDashboard}
-            className="w-full sm:w-auto px-6 py-3.5 bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-sm rounded-xl transition-all cursor-pointer"
-          >
-            <span>Explorer la démo</span>
-          </button>
         </div>
       </section>
 
@@ -850,9 +830,6 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onOpenAuth, onEnterDas
             </button>
             <button onClick={() => onOpenAuth('register')} className="hover:text-slate-900 cursor-pointer">
               Inscription
-            </button>
-            <button onClick={onEnterDashboard} className="hover:text-slate-900 cursor-pointer">
-              Espace Démo
             </button>
           </div>
           <p>© 2026 ModaFlow. Tous droits réservés.</p>

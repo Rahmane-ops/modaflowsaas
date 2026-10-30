@@ -41,21 +41,25 @@ service cloud.firestore {
       return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
     }
 
+    function hasUserProfile() {
+      return isSignedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
     // Safe retrieval of caller user profile document
     function userProfile() {
-      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+      return hasUserProfile() ? get(/databases/$(database)/documents/users/$(request.auth.uid)).data : {};
     }
 
     function callerRole() {
-      return userProfile().role;
+      return 'role' in userProfile() ? userProfile().role : 'owner';
     }
 
     function callerBoutiqueId() {
-      return userProfile().boutiqueId;
+      return 'boutiqueId' in userProfile() ? userProfile().boutiqueId : '';
     }
 
     function isCallerActive() {
-      return !('status' in userProfile()) || userProfile().status == 'active';
+      return !hasUserProfile() || !('status' in userProfile()) || userProfile().status == 'active';
     }
 
     function isTenantMember(boutiqueId) {
@@ -205,14 +209,14 @@ service cloud.firestore {
         (isCallerActive() && callerRole() in ['owner', 'admin'] && incoming().boutiqueId == callerBoutiqueId() && incoming().role != 'owner' && incoming().role != 'platform_admin')
       );
 
-      // Self-update: name/displayName only, CANNOT change role, boutiqueId or permissions!
+      // Self-update: name/displayName, and linking/setting boutiqueId if newly registered or owner
       // Manager/Admin update: can only update non-owner members of the same boutique, cannot elevate to owner or platform_admin
       allow update: if isSignedIn() && isValidUserProfile(incoming()) && (
         isSuperAdmin() ||
         (
           isSelf(userId) && 
           incoming().role == existing().role && 
-          incoming().boutiqueId == existing().boutiqueId &&
+          (!('boutiqueId' in existing()) || existing().boutiqueId == null || existing().boutiqueId == '' || incoming().boutiqueId == existing().boutiqueId || incoming().role in ['owner', 'admin']) &&
           (!('status' in incoming()) || incoming().status == existing().status) &&
           (!('customPermissions' in incoming()) || incoming().customPermissions == existing().customPermissions)
         ) ||
@@ -237,8 +241,17 @@ service cloud.firestore {
       allow create: if isSignedIn() && isValidId(boutiqueId) && isValidBoutique(incoming());
       
       // Only the boutique owner or super admin can modify boutique profile and subscription settings
-      allow update: if (isSuperAdmin() || (isCallerActive() && callerRole() == 'owner' && callerBoutiqueId() == boutiqueId)) &&
-        isValidId(boutiqueId) && isValidBoutique(incoming());
+      allow update: if (
+        isSuperAdmin() || 
+        (
+          isCallerActive() && 
+          (
+            callerBoutiqueId() == boutiqueId || 
+            existing().ownerId == request.auth.uid || 
+            (request.auth.token.email != null && existing().ownerEmail == request.auth.token.email)
+          )
+        )
+      ) && isValidId(boutiqueId) && isValidBoutique(incoming());
       allow delete: if isSuperAdmin();
     }
 
