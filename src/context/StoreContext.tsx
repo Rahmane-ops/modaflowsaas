@@ -849,14 +849,42 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       return;
     }
 
+    // Load locally cached clothes immediately for instant display
+    try {
+      const cached = localStorage.getItem(`modaflow_custom_clothes_${currentBoutique.id}`);
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setClothes(parsed);
+        }
+      }
+    } catch {}
+
     setIsSyncing(true);
 
-    // 1. Clothes subscription
-    const unsubClothes = subscribeToBoutiqueClothes(currentBoutique.id, (items) => {
-      setClothes(items);
-      setIsSyncing(false);
-      setLastCloudSync(new Date().toLocaleTimeString('fr-FR'));
-    });
+    // 1. Clothes subscription avec préservation des articles récents
+    const unsubClothes = subscribeToBoutiqueClothes(
+      currentBoutique.id, 
+      (items) => {
+        setClothes((prev) => {
+          const serverIds = new Set(items.map((i) => i.id));
+          const pending = prev.filter(
+            (p) => !serverIds.has(p.id) && p.boutiqueId === currentBoutique.id
+          );
+          const merged = [...items, ...pending];
+          try {
+            localStorage.setItem(`modaflow_custom_clothes_${currentBoutique.id}`, JSON.stringify(merged));
+          } catch {}
+          return merged;
+        });
+        setIsSyncing(false);
+        setLastCloudSync(new Date().toLocaleTimeString('fr-FR'));
+      },
+      (err) => {
+        console.warn('⚡ [subscribeToBoutiqueClothes notice]:', err);
+        setIsSyncing(false);
+      }
+    );
 
     // 2. Orders subscription
     const unsubOrders = subscribeToBoutiqueOrders(currentBoutique.id, (ords) => {
@@ -1682,22 +1710,45 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       throw new Error(errMsg);
     }
 
-    const id = `cloth-${Date.now()}`;
-    const prefix = itemData.category.substring(0, 3).toUpperCase();
+    const targetBoutiqueId = currentBoutique.id || currentUser.boutiqueId || (boutiques.length > 0 ? boutiques[0].id : '');
+    if (!targetBoutiqueId) {
+      throw new Error("Aucune boutique active n'est sélectionnée pour enregistrer cet article.");
+    }
+
+    // Auto-aligner le boutiqueId du profil utilisateur si nécessaire
+    if (currentUser && currentUser.boutiqueId !== targetBoutiqueId) {
+      const updatedUser = { ...currentUser, boutiqueId: targetBoutiqueId };
+      setCurrentUserState(updatedUser);
+      saveUserProfileToFirestore(updatedUser).catch(() => {});
+    }
+
+    const id = `cloth-${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+    const prefix = (itemData.category || 'art').substring(0, 3).toUpperCase();
     const sku = `${prefix}-${Math.floor(1000 + Math.random() * 9000)}`;
 
     const newItem: ClothingItem = {
       ...itemData,
       id,
       sku,
-      boutiqueId: currentBoutique.id,
+      boutiqueId: targetBoutiqueId,
     };
 
-    // Optimistic local update
-    setClothes((prev) => [newItem, ...prev]);
+    // Optimistic local update avec persistance immédiate dans le cache boutique
+    setClothes((prev) => {
+      const updated = [newItem, ...prev.filter((c) => c.id !== newItem.id)];
+      try {
+        localStorage.setItem(`modaflow_custom_clothes_${targetBoutiqueId}`, JSON.stringify(updated));
+      } catch {}
+      return updated;
+    });
 
-    // Persist to Cloud Firestore
-    await saveClothingItemToFirestore(newItem);
+    // Sauvegarde Cloud Firestore
+    try {
+      await saveClothingItemToFirestore(newItem);
+      console.log('⚡ [Stock/Clothes] Nouvel article enregistré avec succès dans Cloud Firestore:', newItem.id);
+    } catch (saveErr) {
+      console.error('⚡ [Stock/Clothes] Erreur sauvegarde Firestore:', saveErr);
+    }
 
     const log: AuditLog = {
       id: `log-${Date.now()}`,
@@ -1705,23 +1756,39 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       actorName: currentUser.name,
       role: currentUser.role,
       action: 'Nouvel article ajouté',
-      details: `${newItem.name} (${newItem.price.toLocaleString('fr-FR')} FCFA) ajouté au catalogue.`,
-      boutiqueId: currentBoutique.id,
+      details: `${newItem.name} (${newItem.price.toLocaleString('fr-FR')} FCFA, ${newItem.stock} pièces en stock) ajouté au catalogue.`,
+      boutiqueId: targetBoutiqueId,
     };
-    await saveAuditLogToFirestore(log);
+    try {
+      await saveAuditLogToFirestore(log);
+    } catch {}
   };
 
   const updateClothingItem = async (id: string, updates: Partial<ClothingItem>) => {
-    if (!hasPermission('products.update')) {
-      const errMsg = `PERMISSION_DENIED : Le rôle ${currentUser.role} n'a pas l'autorisation de modifier ce vêtement (permission 'products.update' requise).`;
+    if (!hasPermission('products.update') && !hasPermission('inventory.adjust') && !hasPermission('inventory.receive')) {
+      const errMsg = `PERMISSION_DENIED : Le rôle ${currentUser.role} n'a pas l'autorisation de modifier ce vêtement.`;
       console.warn('[RBAC Security]', errMsg);
       throw new Error(errMsg);
     }
 
-    setClothes((prev) =>
-      prev.map((item) => (item.id === id ? { ...item, ...updates } : item))
-    );
-    await updateClothingItemInFirestore(id, updates);
+    const targetBoutiqueId = currentBoutique.id || currentUser.boutiqueId || (boutiques.length > 0 ? boutiques[0].id : '');
+
+    setClothes((prev) => {
+      const updated = prev.map((item) => (item.id === id ? { ...item, ...updates } : item));
+      if (targetBoutiqueId) {
+        try {
+          localStorage.setItem(`modaflow_custom_clothes_${targetBoutiqueId}`, JSON.stringify(updated));
+        } catch {}
+      }
+      return updated;
+    });
+
+    try {
+      await updateClothingItemInFirestore(id, updates);
+      console.log('⚡ [Stock/Clothes] Modification article enregistrée dans Cloud Firestore:', id);
+    } catch (updateErr) {
+      console.error('⚡ [Stock/Clothes] Erreur mise à jour Firestore:', updateErr);
+    }
   };
 
   const adjustStock = async (id: string, delta: number) => {
@@ -1735,10 +1802,24 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     if (!item) return;
 
     const newStock = Math.max(0, item.stock + delta);
-    setClothes((prev) =>
-      prev.map((c) => (c.id === id ? { ...c, stock: newStock } : c))
-    );
-    await updateClothingItemInFirestore(id, { stock: newStock });
+    const targetBoutiqueId = currentBoutique.id || currentUser.boutiqueId || (boutiques.length > 0 ? boutiques[0].id : '');
+
+    setClothes((prev) => {
+      const updated = prev.map((c) => (c.id === id ? { ...c, stock: newStock } : c));
+      if (targetBoutiqueId) {
+        try {
+          localStorage.setItem(`modaflow_custom_clothes_${targetBoutiqueId}`, JSON.stringify(updated));
+        } catch {}
+      }
+      return updated;
+    });
+
+    try {
+      await updateClothingItemInFirestore(id, { stock: newStock });
+      console.log('⚡ [Stock] Stock ajusté dans Firestore:', id, '| Nouveau total:', newStock);
+    } catch (err) {
+      console.error('⚡ [Stock] Erreur ajustement stock Firestore:', err);
+    }
   };
 
   const deleteClothingItem = async (id: string) => {
@@ -1748,8 +1829,23 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       throw new Error(errMsg);
     }
 
-    setClothes((prev) => prev.filter((i) => i.id !== id));
-    await deleteClothingItemFromFirestore(id);
+    const targetBoutiqueId = currentBoutique.id || currentUser.boutiqueId || (boutiques.length > 0 ? boutiques[0].id : '');
+
+    setClothes((prev) => {
+      const updated = prev.filter((item) => item.id !== id);
+      if (targetBoutiqueId) {
+        try {
+          localStorage.setItem(`modaflow_custom_clothes_${targetBoutiqueId}`, JSON.stringify(updated));
+        } catch {}
+      }
+      return updated;
+    });
+
+    try {
+      await deleteClothingItemFromFirestore(id);
+    } catch (delErr) {
+      console.error('⚡ [Stock/Clothes] Erreur suppression Firestore:', delErr);
+    }
   };
 
   // Optional: Seed 3 starter sample clothing items if shop manager explicitly clicks to populate
