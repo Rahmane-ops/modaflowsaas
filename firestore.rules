@@ -65,10 +65,12 @@ service cloud.firestore {
     function isTenantMember(boutiqueId) {
       return isSignedIn() && isCallerActive() && (
         isSuperAdmin() || 
-        callerBoutiqueId() == boutiqueId ||
-        (exists(/databases/$(database)/documents/boutiques/$(boutiqueId)) && 
-          (get(/databases/$(database)/documents/boutiques/$(boutiqueId)).data.ownerId == request.auth.uid ||
-           (request.auth.token.email != null && get(/databases/$(database)/documents/boutiques/$(boutiqueId)).data.ownerEmail == request.auth.token.email)))
+        (boutiqueId is string && boutiqueId.size() > 0 && (
+          callerBoutiqueId() == boutiqueId ||
+          (exists(/databases/$(database)/documents/boutiques/$(boutiqueId)) && 
+            (('ownerId' in get(/databases/$(database)/documents/boutiques/$(boutiqueId)).data && get(/databases/$(database)/documents/boutiques/$(boutiqueId)).data.ownerId == request.auth.uid) ||
+             (request.auth.token.email != null && 'ownerEmail' in get(/databases/$(database)/documents/boutiques/$(boutiqueId)).data && (get(/databases/$(database)/documents/boutiques/$(boutiqueId)).data.ownerEmail == request.auth.token.email || get(/databases/$(database)/documents/boutiques/$(boutiqueId)).data.ownerEmail == request.auth.token.email.lower()))))
+        ))
       );
     }
 
@@ -136,15 +138,17 @@ service cloud.firestore {
         data.invoiceNumber is string && data.invoiceNumber.size() <= 64 &&
         data.clientName is string && data.clientName.size() > 0 && data.clientName.size() <= 120 &&
         data.totalAmount is number && data.totalAmount >= 0 &&
-        data.paymentMethod in ['wave', 'orange_money', 'cash'] &&
-        data.status in ['en_cours', 'livre_paye', 'annule'] &&
-        (!('paymentStatus' in data) || data.paymentStatus in ['en_attente', 'solde']) &&
+        data.paymentMethod in ['wave', 'orange_money', 'cash', 'especes', 'carte', 'virement', 'cheque'] &&
+        data.status in ['en_cours', 'livre_paye', 'annule', 'complete'] &&
+        (!('paymentStatus' in data) || data.paymentStatus in ['en_attente', 'solde', 'paye', 'partiel']) &&
         (!('clientPhone' in data) || (data.clientPhone is string && data.clientPhone.size() <= 50)) &&
         (!('deliveryAddress' in data) || (data.deliveryAddress is string && data.deliveryAddress.size() <= 300)) &&
         (!('isDelivery' in data) || data.isDelivery is bool) &&
         (!('deliveryDriverId' in data) || (data.deliveryDriverId is string && data.deliveryDriverId.size() <= 128)) &&
         (!('deliveryDriverName' in data) || (data.deliveryDriverName is string && data.deliveryDriverName.size() <= 120)) &&
         (!('items' in data) || (data.items is list && data.items.size() <= 50)) &&
+        (!('subtotalAmount' in data) || (data.subtotalAmount is number && data.subtotalAmount >= 0)) &&
+        (!('discount' in data) || data.discount is map) &&
         (!('createdAt' in data) || (data.createdAt is string && data.createdAt.size() <= 50)) &&
         (!('deliveredAt' in data) || (data.deliveredAt is string && data.deliveredAt.size() <= 50)) &&
         (!('createdBySellerId' in data) || (data.createdBySellerId is string && data.createdBySellerId.size() <= 128)) &&
@@ -275,27 +279,23 @@ service cloud.firestore {
           hasCallerPermission('products.create')
         );
 
-      // UPDATE: accountant and cashier cannot update products. Stock manager can only adjust stock.
+      // UPDATE: Owner, admin, manager, or cashier/seller/stock_manager adjusting stock during sales or inventory
       allow update: if isSignedIn() && isCallerActive() && isValidId(clothId) && isValidClothingItem(incoming()) &&
-        isTenantMember(existing().boutiqueId) &&
-        existing().boutiqueId == incoming().boutiqueId &&
+        (!('boutiqueId' in existing()) || isTenantMember(existing().boutiqueId)) &&
+        (!('boutiqueId' in existing()) || !('boutiqueId' in incoming()) || existing().boutiqueId == incoming().boutiqueId) &&
         callerRole() != 'accountant' &&
-        callerRole() != 'cashier' &&
         (
-          callerRole() in ['owner', 'admin'] ||
+          isSuperAdmin() ||
+          callerRole() in ['owner', 'admin', 'manager'] ||
           hasCallerPermission('products.update') ||
-          (
-            callerRole() == 'stock_manager' &&
-            incoming().price == existing().price &&
-            incoming().costPrice == existing().costPrice &&
-            incoming().name == existing().name &&
-            incoming().category == existing().category
-          )
+          hasCallerPermission('sales.create') ||
+          hasCallerPermission('inventory.adjust') ||
+          callerRole() in ['cashier', 'seller', 'stock_manager']
         );
 
       // DELETE: owner or admin only
       allow delete: if isSignedIn() && isCallerActive() && isValidId(clothId) &&
-        isTenantMember(existing().boutiqueId) &&
+        (!('boutiqueId' in existing()) || isTenantMember(existing().boutiqueId)) &&
         (isSuperAdmin() || callerRole() in ['owner', 'admin']);
     }
 
@@ -306,21 +306,24 @@ service cloud.firestore {
 
       // CREATE: Cashier, seller, manager, admin, owner. STRICTLY FORBIDDEN FOR ACCOUNTANT & STOCK_MANAGER
       allow create: if isSignedIn() && isCallerActive() && isValidId(orderId) && isValidOrder(incoming()) &&
-        isTenantMember(incoming().boutiqueId) &&
-        callerRole() != 'accountant' &&
-        callerRole() != 'stock_manager' &&
         (
+          isSuperAdmin() ||
+          (!('boutiqueId' in incoming()) || incoming().boutiqueId == '' || isTenantMember(incoming().boutiqueId)) ||
+          (incoming().createdBySellerId == request.auth.uid) ||
           callerRole() in ['owner', 'admin', 'manager', 'cashier', 'seller'] ||
           hasCallerPermission('sales.create')
-        );
+        ) &&
+        callerRole() != 'accountant' &&
+        callerRole() != 'stock_manager';
 
       // UPDATE: Deliveries, cancellations and refunds require specific roles
       allow update: if isSignedIn() && isCallerActive() && isValidId(orderId) && isValidOrder(incoming()) &&
-        isTenantMember(existing().boutiqueId) &&
-        existing().boutiqueId == incoming().boutiqueId &&
+        (!('boutiqueId' in existing()) || isTenantMember(existing().boutiqueId)) &&
+        (!('boutiqueId' in existing()) || !('boutiqueId' in incoming()) || existing().boutiqueId == incoming().boutiqueId) &&
         (
-          callerRole() in ['owner', 'admin'] ||
-          (incoming().status != 'annule' && callerRole() in ['manager', 'delivery']) ||
+          isSuperAdmin() ||
+          callerRole() in ['owner', 'admin', 'manager'] ||
+          (incoming().status != 'annule' && callerRole() in ['delivery', 'cashier', 'seller']) ||
           (incoming().status == 'annule' && hasCallerPermission('sales.cancel')) ||
           hasCallerPermission('sales.refund')
         );
@@ -333,17 +336,18 @@ service cloud.firestore {
       allow get, list: if isSignedIn() && isCallerActive();
 
       allow create: if isSignedIn() && isCallerActive() && isValidId(clientId) && isValidClient(incoming()) &&
-        isTenantMember(incoming().boutiqueId) &&
+        (!('boutiqueId' in incoming()) || incoming().boutiqueId == '' || isTenantMember(incoming().boutiqueId)) &&
         callerRole() != 'stock_manager' &&
         callerRole() != 'accountant';
 
       allow update: if isSignedIn() && isCallerActive() && isValidId(clientId) && isValidClient(incoming()) &&
-        isTenantMember(existing().boutiqueId) &&
-        existing().boutiqueId == incoming().boutiqueId &&
-        callerRole() != 'stock_manager';
+        (!('boutiqueId' in existing()) || isTenantMember(existing().boutiqueId)) &&
+        (!('boutiqueId' in existing()) || !('boutiqueId' in incoming()) || existing().boutiqueId == incoming().boutiqueId) &&
+        callerRole() != 'stock_manager' &&
+        callerRole() != 'accountant';
 
       allow delete: if isSignedIn() && isCallerActive() && isValidId(clientId) &&
-        isTenantMember(existing().boutiqueId) &&
+        (!('boutiqueId' in existing()) || isTenantMember(existing().boutiqueId)) &&
         (isSuperAdmin() || callerRole() in ['owner', 'admin']);
     }
 
@@ -352,8 +356,10 @@ service cloud.firestore {
       allow get, list: if isSignedIn() && isCallerActive();
 
       allow create: if isSignedIn() && isCallerActive() && isValidId(transactionId) && isValidTransaction(incoming()) &&
-        isTenantMember(incoming().boutiqueId) &&
+        (!('boutiqueId' in incoming()) || incoming().boutiqueId == '' || isTenantMember(incoming().boutiqueId)) &&
         (
+          isSuperAdmin() ||
+          callerRole() in ['owner', 'admin'] ||
           // Expenses: allowed for owner, admin, accountant, forbidden for cashier and stock_manager
           (incoming().type == 'depense' && callerRole() in ['owner', 'admin', 'accountant']) ||
           // Sales: allowed for owner, admin, manager, cashier, seller, forbidden for accountant and stock_manager
@@ -365,11 +371,11 @@ service cloud.firestore {
         );
 
       allow update: if isSignedIn() && isCallerActive() && isValidId(transactionId) && isValidTransaction(incoming()) &&
-        isTenantMember(existing().boutiqueId) &&
+        (!('boutiqueId' in existing()) || isTenantMember(existing().boutiqueId)) &&
         (isSuperAdmin() || callerRole() in ['owner', 'admin']);
 
       allow delete: if isSignedIn() && isCallerActive() && isValidId(transactionId) &&
-        isTenantMember(existing().boutiqueId) &&
+        (!('boutiqueId' in existing()) || isTenantMember(existing().boutiqueId)) &&
         (isSuperAdmin() || callerRole() in ['owner', 'admin']);
     }
 

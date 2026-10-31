@@ -538,15 +538,18 @@ export const executeOrderSaleTransaction = async (params: {
   if (!auth.currentUser) return;
   const { order, cartItems, boutiqueId, transactionRecord, clientRecord } = params;
 
+  const effectiveBoutiqueId = (boutiqueId || order.boutiqueId || '').trim();
+
   try {
     await runTransaction(db, async (transaction) => {
       // 1. Check stock for each cloth item before decrementing (both total stock and sizeStock)
       for (const item of cartItems) {
+        if (!item.clothingId) continue;
         const clothRef = doc(db, 'clothes', item.clothingId);
         const clothSnap = await transaction.get(clothRef);
         if (clothSnap.exists()) {
           const data = clothSnap.data();
-          const currentStock = data.stock || 0;
+          const currentStock = typeof data.stock === 'number' ? data.stock : 0;
           const newStock = Math.max(0, currentStock - item.quantity);
           const updateData: Record<string, any> = { stock: newStock };
 
@@ -559,24 +562,40 @@ export const executeOrderSaleTransaction = async (params: {
             updateData.sizeStock = newSizeStock;
           }
 
+          if (!data.boutiqueId && effectiveBoutiqueId) {
+            updateData.boutiqueId = effectiveBoutiqueId;
+          }
+
           transaction.update(clothRef, updateData);
         }
       }
 
       // 2. Write Order (Sanitized from undefined fields)
       const orderRef = doc(db, 'orders', order.id);
-      transaction.set(orderRef, sanitizeForFirestore({ ...order, boutiqueId }));
+      const cleanOrderData: Record<string, any> = {
+        ...order,
+        ...(effectiveBoutiqueId ? { boutiqueId: effectiveBoutiqueId } : {}),
+      };
+      transaction.set(orderRef, sanitizeForFirestore(cleanOrderData));
 
       // 3. Write Client update if provided
       if (clientRecord) {
         const clientRef = doc(db, 'clients', clientRecord.id);
-        transaction.set(clientRef, sanitizeForFirestore({ ...clientRecord, boutiqueId }), { merge: true });
+        const cleanClientData: Record<string, any> = {
+          ...clientRecord,
+          ...(effectiveBoutiqueId ? { boutiqueId: effectiveBoutiqueId } : {}),
+        };
+        transaction.set(clientRef, sanitizeForFirestore(cleanClientData), { merge: true });
       }
 
       // 4. Write Transaction if settled directly
       if (transactionRecord) {
         const trxRef = doc(db, 'transactions', transactionRecord.id);
-        transaction.set(trxRef, sanitizeForFirestore({ ...transactionRecord, boutiqueId }));
+        const cleanTrxData: Record<string, any> = {
+          ...transactionRecord,
+          ...(effectiveBoutiqueId ? { boutiqueId: effectiveBoutiqueId } : {}),
+        };
+        transaction.set(trxRef, sanitizeForFirestore(cleanTrxData));
       }
     });
   } catch (error) {

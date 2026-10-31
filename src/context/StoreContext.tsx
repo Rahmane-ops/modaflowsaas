@@ -1964,6 +1964,24 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     const discountAmount = orderData.discount ? Math.min(subtotalAmount, Math.max(0, orderData.discount.amount)) : 0;
     const orderTotal = Math.max(0, subtotalAmount - discountAmount);
 
+    // Résolution multi-niveaux du boutiqueId pour garantir la persistance et l'isolation Firestore
+    const targetBoutiqueId =
+      currentBoutique?.id ||
+      currentUser?.boutiqueId ||
+      (boutiques.length > 0 ? boutiques[0].id : '') ||
+      localStorage.getItem(STORAGE_KEYS.CURRENT_BOUTIQUE_ID) ||
+      '';
+
+    if (targetBoutiqueId && (!currentBoutique?.id || currentBoutique.id === '')) {
+      const matchedBtq = boutiques.find((b) => b.id === targetBoutiqueId);
+      if (matchedBtq) {
+        setCurrentBoutiqueState(matchedBtq);
+      }
+      try {
+        localStorage.setItem(STORAGE_KEYS.CURRENT_BOUTIQUE_ID, targetBoutiqueId);
+      } catch {}
+    }
+
     const newOrder: Order = {
       id: orderId,
       invoiceNumber,
@@ -1985,7 +2003,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       createdBySellerId: currentUser.id,
       createdBySellerName: currentUser.name,
       notes: orderData.notes || '',
-      boutiqueId: currentBoutique.id,
+      boutiqueId: targetBoutiqueId,
     };
 
     // Client CRM update record
@@ -2008,7 +2026,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         loyaltyPoints: existingClient.loyaltyPoints + earnedPoints,
         loyaltyTier: newTotalSpent >= 120000 || newOrdersCount >= 3 ? 'vip' : newTotalSpent >= 50000 ? 'fidele' : 'nouveau',
         lastOrderDate: now.toISOString().substring(0, 10),
-        boutiqueId: currentBoutique.id,
+        boutiqueId: targetBoutiqueId,
       };
     } else {
       clientRecord = {
@@ -2023,7 +2041,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         favoriteCategory: cart[0]?.category || 'robes',
         createdAt: now.toISOString().substring(0, 10),
         lastOrderDate: now.toISOString().substring(0, 10),
-        boutiqueId: currentBoutique.id,
+        boutiqueId: targetBoutiqueId,
       };
     }
 
@@ -2045,7 +2063,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         timestamp: formattedDate,
         itemsSummary,
         type: 'vente',
-        boutiqueId: currentBoutique.id,
+        boutiqueId: targetBoutiqueId,
       };
     }
 
@@ -2083,7 +2101,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       await executeOrderSaleTransaction({
         order: newOrder,
         cartItems: cart,
-        boutiqueId: currentBoutique.id,
+        boutiqueId: targetBoutiqueId,
         transactionRecord,
         clientRecord,
       });
@@ -2105,6 +2123,13 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
     const targetOrder = orders.find((o) => o.id === orderId);
     if (!targetOrder || targetOrder.status === 'livre_paye') return;
+
+    const targetBoutiqueId =
+      currentBoutique?.id ||
+      targetOrder.boutiqueId ||
+      currentUser?.boutiqueId ||
+      (boutiques.length > 0 ? boutiques[0].id : '') ||
+      '';
 
     const now = new Date();
     const formattedDate = now.toISOString().replace('T', ' ').substring(0, 16);
@@ -2132,7 +2157,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       timestamp: formattedDate,
       itemsSummary,
       type: 'vente',
-      boutiqueId: currentBoutique.id,
+      boutiqueId: targetBoutiqueId,
     };
 
     if (!firebaseUser) {
@@ -2158,7 +2183,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         driverName,
         paymentMethod: finalPaymentMethod,
         transactionRecord: newTransaction,
-        boutiqueId: currentBoutique.id,
+        boutiqueId: targetBoutiqueId,
       });
     }
 
