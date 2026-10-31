@@ -540,66 +540,77 @@ export const executeOrderSaleTransaction = async (params: {
 
   const effectiveBoutiqueId = (boutiqueId || order.boutiqueId || '').trim();
 
+  // 1. Enregistrer la commande de manière prioritaire et directe
+  const orderRef = doc(db, 'orders', order.id);
+  const cleanOrderData: Record<string, any> = {
+    ...order,
+    ...(effectiveBoutiqueId ? { boutiqueId: effectiveBoutiqueId } : {}),
+  };
   try {
-    await runTransaction(db, async (transaction) => {
-      // 1. Check stock for each cloth item before decrementing (both total stock and sizeStock)
-      for (const item of cartItems) {
-        if (!item.clothingId) continue;
-        const clothRef = doc(db, 'clothes', item.clothingId);
-        const clothSnap = await transaction.get(clothRef);
-        if (clothSnap.exists()) {
-          const data = clothSnap.data();
-          const currentStock = typeof data.stock === 'number' ? data.stock : 0;
-          const newStock = Math.max(0, currentStock - item.quantity);
-          const updateData: Record<string, any> = { stock: newStock };
-
-          if (data.sizeStock && item.size && typeof data.sizeStock[item.size] === 'number') {
-            const currentSizeStock = data.sizeStock[item.size] || 0;
-            const newSizeStock = {
-              ...data.sizeStock,
-              [item.size]: Math.max(0, currentSizeStock - item.quantity),
-            };
-            updateData.sizeStock = newSizeStock;
-          }
-
-          if (!data.boutiqueId && effectiveBoutiqueId) {
-            updateData.boutiqueId = effectiveBoutiqueId;
-          }
-
-          transaction.update(clothRef, updateData);
-        }
-      }
-
-      // 2. Write Order (Sanitized from undefined fields)
-      const orderRef = doc(db, 'orders', order.id);
-      const cleanOrderData: Record<string, any> = {
-        ...order,
-        ...(effectiveBoutiqueId ? { boutiqueId: effectiveBoutiqueId } : {}),
-      };
-      transaction.set(orderRef, sanitizeForFirestore(cleanOrderData));
-
-      // 3. Write Client update if provided
-      if (clientRecord) {
-        const clientRef = doc(db, 'clients', clientRecord.id);
-        const cleanClientData: Record<string, any> = {
-          ...clientRecord,
-          ...(effectiveBoutiqueId ? { boutiqueId: effectiveBoutiqueId } : {}),
-        };
-        transaction.set(clientRef, sanitizeForFirestore(cleanClientData), { merge: true });
-      }
-
-      // 4. Write Transaction if settled directly
-      if (transactionRecord) {
-        const trxRef = doc(db, 'transactions', transactionRecord.id);
-        const cleanTrxData: Record<string, any> = {
-          ...transactionRecord,
-          ...(effectiveBoutiqueId ? { boutiqueId: effectiveBoutiqueId } : {}),
-        };
-        transaction.set(trxRef, sanitizeForFirestore(cleanTrxData));
-      }
-    });
+    await setDoc(orderRef, sanitizeForFirestore(cleanOrderData));
+    console.log('⚡ [Sale Execution] Commande enregistrée avec succès dans Firestore:', order.id);
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, `orders/${order.id}`);
+  }
+
+  // 2. Décrémentation du stock pour chaque article du panier
+  for (const item of cartItems) {
+    if (!item.clothingId) continue;
+    try {
+      const clothRef = doc(db, 'clothes', item.clothingId);
+      const clothSnap = await getDoc(clothRef);
+      if (clothSnap.exists()) {
+        const data = clothSnap.data();
+        const currentStock = typeof data.stock === 'number' ? data.stock : 0;
+        const newStock = Math.max(0, currentStock - item.quantity);
+        const updateData: Record<string, any> = { stock: newStock };
+
+        if (data.sizeStock && item.size && typeof data.sizeStock[item.size] === 'number') {
+          const currentSizeStock = data.sizeStock[item.size] || 0;
+          const newSizeStock = {
+            ...data.sizeStock,
+            [item.size]: Math.max(0, currentSizeStock - item.quantity),
+          };
+          updateData.sizeStock = newSizeStock;
+        }
+
+        if (!data.boutiqueId && effectiveBoutiqueId) {
+          updateData.boutiqueId = effectiveBoutiqueId;
+        }
+
+        await updateDoc(clothRef, updateData);
+      }
+    } catch (stockErr) {
+      console.warn('⚡ [Sale Execution] Note décrémentation stock article:', item.clothingId, stockErr);
+    }
+  }
+
+  // 3. Mise à jour de la fiche client CRM
+  if (clientRecord) {
+    try {
+      const clientRef = doc(db, 'clients', clientRecord.id);
+      const cleanClientData: Record<string, any> = {
+        ...clientRecord,
+        ...(effectiveBoutiqueId ? { boutiqueId: effectiveBoutiqueId } : {}),
+      };
+      await setDoc(clientRef, sanitizeForFirestore(cleanClientData), { merge: true });
+    } catch (cliErr) {
+      console.warn('⚡ [Sale Execution] Note mise à jour client CRM:', cliErr);
+    }
+  }
+
+  // 4. Enregistrement de la transaction financière
+  if (transactionRecord) {
+    try {
+      const trxRef = doc(db, 'transactions', transactionRecord.id);
+      const cleanTrxData: Record<string, any> = {
+        ...transactionRecord,
+        ...(effectiveBoutiqueId ? { boutiqueId: effectiveBoutiqueId } : {}),
+      };
+      await setDoc(trxRef, sanitizeForFirestore(cleanTrxData));
+    } catch (trxErr) {
+      console.warn('⚡ [Sale Execution] Note enregistrement transaction financière:', trxErr);
+    }
   }
 };
 
