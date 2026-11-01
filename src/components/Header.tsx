@@ -78,11 +78,7 @@ export const Header: React.FC<HeaderProps> = ({
 
   const isSuperAdminAuthorized =
     isSuperAdmin &&
-    currentUser?.id !== 'user-owner' &&
-    currentUser?.role !== 'owner' &&
-    ((currentUser?.email || '').trim().toLowerCase() === 'abdourahmanebathily1@gmail.com' ||
-     currentUser?.role === 'superadmin' ||
-     currentUser?.role === 'platform_admin');
+    (currentUser?.email || '').trim().toLowerCase() === 'abdourahmanebathily1@gmail.com';
 
   return (
     <header className="sticky top-0 z-30 bg-white/95 backdrop-blur-md border-b border-slate-200/80">

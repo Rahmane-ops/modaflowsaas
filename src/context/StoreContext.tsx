@@ -604,14 +604,15 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [superAdminIntervenedBoutique, setSuperAdminIntervenedBoutique] = useState<BoutiqueTenant | null>(null);
 
   // Check if current active user is Super Admin (Sovereign owner of SaaS)
-  // STRICT PRINCIPLE: Boutique owners (role === 'owner', user-owner) and employees are NEVER Super Admin!
+  // STRICT PRINCIPLE: Only abdourahmanebathily1@gmail.com is authorized to be Super Admin!
   const isSuperAdmin = useMemo(() => {
     return isPlatformSuperAdmin(currentUser);
   }, [currentUser]);
 
   // Strict guard for Super Admin navigation
   const setIsSuperAdminViewOpen = (open: boolean) => {
-    if (open && !isSuperAdmin) {
+    const isAuthorizedSovereign = isSuperAdmin && (currentUser?.email || '').trim().toLowerCase() === 'abdourahmanebathily1@gmail.com';
+    if (open && !isAuthorizedSovereign) {
       console.warn("Accès strictement refusé : cet espace d'administration est réservé au Super Admin de la plateforme SaaS.");
       setIsSuperAdminViewOpenState(false);
       try {
@@ -625,15 +626,16 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     } catch {}
   };
 
-  // Immediate protection: If currentUser is not Super Admin, force close any super admin view
+  // Immediate protection: If currentUser is not the sovereign Super Admin, force close any super admin view immediately
   useEffect(() => {
-    if (!isSuperAdmin && isSuperAdminViewOpen) {
+    const isAuthorizedSovereign = isSuperAdmin && (currentUser?.email || '').trim().toLowerCase() === 'abdourahmanebathily1@gmail.com';
+    if (!isAuthorizedSovereign && isSuperAdminViewOpen) {
       setIsSuperAdminViewOpenState(false);
       try {
         localStorage.setItem('modaflow_is_superadmin_view_open', 'false');
       } catch {}
     }
-  }, [isSuperAdmin, isSuperAdminViewOpen]);
+  }, [isSuperAdmin, currentUser, isSuperAdminViewOpen]);
 
   // --------------------------------------------------------------------------
   // 1. FIREBASE AUTH LISTENER (Production Authentication)
@@ -692,10 +694,31 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           localStorage.setItem(STORAGE_KEYS.IS_LANDING, 'false');
           if (userBoutiques.length > 0) {
             setBoutiques(userBoutiques);
-            setCurrentBoutiqueState(userBoutiques[0]);
+
+            // Préserver impérativement la boutique active lors du rafraîchissement
+            const savedBtqId = localStorage.getItem(STORAGE_KEYS.CURRENT_BOUTIQUE_ID);
+            let activeBtq = savedBtqId ? userBoutiques.find((b) => b.id === savedBtqId) : null;
+
+            // Si le Super Admin intervenait dans une boutique client qui n'est pas dans ses boutiques directes
+            if (!activeBtq && savedBtqId && isAuthorizedOwner) {
+              try {
+                const bDocRef = doc(db, 'boutiques', savedBtqId);
+                const bSnap = await getDoc(bDocRef);
+                if (bSnap.exists()) {
+                  activeBtq = { ...(bSnap.data() as BoutiqueTenant), id: bSnap.id };
+                  userBoutiques = [activeBtq, ...userBoutiques.filter((b) => b.id !== activeBtq!.id)];
+                  setBoutiques(userBoutiques);
+                }
+              } catch (bErr) {
+                console.warn('[Boutique Restoration Notice]', bErr);
+              }
+            }
+
+            const targetBtq = activeBtq || userBoutiques[0];
+            setCurrentBoutiqueState(targetBtq);
             try {
               localStorage.setItem('modaflow_custom_boutiques', JSON.stringify(userBoutiques));
-              localStorage.setItem(STORAGE_KEYS.CURRENT_BOUTIQUE_ID, userBoutiques[0].id);
+              localStorage.setItem(STORAGE_KEYS.CURRENT_BOUTIQUE_ID, targetBtq.id);
             } catch {}
           }
         } else {
@@ -715,16 +738,28 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           console.log('⚡ [Auth Listener] Lecture profil Firestore pour UID', fbUser.uid, ':', profile ? `Rôle="${profile.role}"` : 'Aucun document existant');
 
           if (profile) {
-            const isSuperAdminRole = isAuthorizedOwner || profile.role === 'superadmin' || profile.role === 'platform_admin';
-            if (isSuperAdminRole) {
-              console.log('⚡ [Auth Listener] Rôle SUPERADMIN détecté dans Firestore pour:', userEmail);
+            if (isAuthorizedOwner) {
+              console.log('⚡ [Auth Listener] Rôle SUPERADMIN souverain vérifié pour:', userEmail);
               profile.role = 'superadmin';
               profile.title = 'Propriétaire & Super Administrateur SaaS';
               profile.avatar = '⚡';
               profile.status = 'active';
-              setIsSuperAdminViewOpenState(true);
+              // RÈGLE SÉCURITÉ : Ne JAMAIS forcer l'ouverture automatique de la console au rafraîchissement.
+              // L'utilisateur reste dans la boutique où il travaille, et ouvre la console quand il le souhaite.
+              setIsSuperAdminViewOpenState(false);
               try {
-                localStorage.setItem('modaflow_is_superadmin_view_open', 'true');
+                localStorage.setItem('modaflow_is_superadmin_view_open', 'false');
+              } catch {}
+            } else if (profile.role === 'superadmin' || profile.role === 'platform_admin') {
+              // Sécurité renforcée : aucun tiers ne peut posséder le rôle superadmin
+              console.warn('⚡ [Sécurité SuperAdmin] Compte tiers avec rôle superadmin rétrogradé vers owner:', userEmail);
+              profile.role = 'owner';
+              profile.title = 'Propriétaire & Administrateur Boutique';
+              profile.avatar = '👑';
+              setIsSuperAdminViewOpenState(false);
+              try {
+                localStorage.setItem('modaflow_is_superadmin_view_open', 'false');
+                saveUserProfileToFirestore(profile).catch(() => {});
               } catch {}
             }
             setCurrentUserState(profile);
@@ -761,13 +796,10 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             }
             setCurrentUserState(newProfile);
             setUsers((prev) => [newProfile, ...prev]);
-            if (isAuthorizedOwner) {
-              console.log('⚡ [Auth Listener] Activation souveraine SuperAdmin pour nouvel utilisateur:', userEmail);
-              setIsSuperAdminViewOpenState(true);
-              try {
-                localStorage.setItem('modaflow_is_superadmin_view_open', 'true');
-              } catch {}
-            }
+            setIsSuperAdminViewOpenState(false);
+            try {
+              localStorage.setItem('modaflow_is_superadmin_view_open', 'false');
+            } catch {}
           }
         } catch (e) {
           console.error('⚡ [Auth Listener] Erreur récupération/création profil Firestore:', e);
@@ -787,9 +819,9 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
               activeSessions: [],
             };
             setCurrentUserState(emergencyProfile);
-            setIsSuperAdminViewOpenState(true);
+            setIsSuperAdminViewOpenState(false);
             try {
-              localStorage.setItem('modaflow_is_superadmin_view_open', 'true');
+              localStorage.setItem('modaflow_is_superadmin_view_open', 'false');
             } catch {}
           }
         }
@@ -1130,13 +1162,13 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           }
 
           loginUser(superAdminUser);
-          setIsSuperAdminViewOpenState(true);
+          setIsSuperAdminViewOpenState(false);
           try {
-            localStorage.setItem('modaflow_is_superadmin_view_open', 'true');
+            localStorage.setItem('modaflow_is_superadmin_view_open', 'false');
           } catch {}
           return {
             success: true,
-            message: 'Bienvenue sur votre console Super Admin, Abdourahmane Bathily !',
+            message: 'Bienvenue sur votre espace ModaFlow, Abdourahmane Bathily !',
             isSuperAdmin: true,
             user: superAdminUser,
           };
@@ -1371,17 +1403,11 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       } catch {}
     }
 
-    const isSovereignSuper =
-      isSuper ||
-      (user.email || '').trim().toLowerCase() === 'abdourahmanebathily1@gmail.com' ||
-      user.role === 'superadmin';
-
-    if (isSovereignSuper) {
-      setIsSuperAdminViewOpenState(true);
-      try {
-        localStorage.setItem('modaflow_is_superadmin_view_open', 'true');
-      } catch {}
-    }
+    // Même pour le Super Admin, la connexion atterrit dans la boutique par défaut sans forcer l'ouverture de la console
+    setIsSuperAdminViewOpenState(false);
+    try {
+      localStorage.setItem('modaflow_is_superadmin_view_open', 'false');
+    } catch {}
 
     setCurrentUserState(user);
     setIsLoggedIn(true);
@@ -1568,24 +1594,12 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   };
 
   const loginUser = (user: UserAccount) => {
-    const isSuper =
-      isPlatformSuperAdmin(user) ||
-      (user.email || '').trim().toLowerCase() === 'abdourahmanebathily1@gmail.com' ||
-      user.role === 'superadmin' ||
-      user.role === 'platform_admin';
-
-    if (isSuper) {
-      console.log('⚡ [Auth] loginUser() appelé pour SuperAdmin:', user.email);
-      setIsSuperAdminViewOpenState(true);
-      try {
-        localStorage.setItem('modaflow_is_superadmin_view_open', 'true');
-      } catch {}
-    } else {
-      setIsSuperAdminViewOpenState(false);
-      try {
-        localStorage.setItem('modaflow_is_superadmin_view_open', 'false');
-      } catch {}
-    }
+    // Par défaut, l'utilisateur accède à sa boutique active.
+    // La console Super Admin ne doit jamais s'ouvrir automatiquement sans clic délibéré.
+    setIsSuperAdminViewOpenState(false);
+    try {
+      localStorage.setItem('modaflow_is_superadmin_view_open', 'false');
+    } catch {}
 
     setCurrentUserState(user);
     setIsLoggedIn(true);
@@ -2438,6 +2452,10 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const setCurrentBoutique = (boutique: BoutiqueTenant) => {
     setCurrentBoutiqueState(boutique);
     localStorage.setItem(STORAGE_KEYS.CURRENT_BOUTIQUE_ID, boutique.id);
+    setIsSuperAdminViewOpenState(false);
+    try {
+      localStorage.setItem('modaflow_is_superadmin_view_open', 'false');
+    } catch {}
   };
 
   const registerBoutique = async (data: {

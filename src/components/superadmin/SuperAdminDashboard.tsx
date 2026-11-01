@@ -108,11 +108,7 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({ onClos
 
   const isSuperAdminAuthorized =
     isSuperAdmin &&
-    currentUser?.id !== 'user-owner' &&
-    currentUser?.role !== 'owner' &&
-    ((currentUser?.email || '').trim().toLowerCase() === 'abdourahmanebathily1@gmail.com' ||
-     currentUser?.role === 'superadmin' ||
-     currentUser?.role === 'platform_admin');
+    (currentUser?.email || '').trim().toLowerCase() === 'abdourahmanebathily1@gmail.com';
 
   // Immediately close if an unauthorized user reaches this component
   React.useEffect(() => {

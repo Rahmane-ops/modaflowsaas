@@ -253,6 +253,10 @@
       "schema": { "$ref": "#/entities/ClothingItem" },
       "description": "Articles, models, sizes and inventory catalog"
     },
+    "/inventory/{itemId}": {
+      "schema": { "$ref": "#/entities/ClothingItem" },
+      "description": "Inventory clothing items, stock levels and article catalog"
+    },
     "/orders/{orderId}": {
       "schema": { "$ref": "#/entities/Order" },
       "description": "Client orders, delivery tickets and return histories"

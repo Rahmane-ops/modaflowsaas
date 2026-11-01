@@ -49,6 +49,7 @@ const AppContent: React.FC = () => {
     currentBoutique,
     boutiques,
     setCurrentBoutique,
+    currentUser,
   } = useStore();
 
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
@@ -220,7 +221,7 @@ const AppContent: React.FC = () => {
         />
 
         {/* Super Admin Sovereign Intervention Mode Banner (Total Access to All Boutiques) */}
-        {isSuperAdmin && !isSuperAdminViewOpen && (
+        {isSuperAdmin && !isSuperAdminViewOpen && (currentUser?.email || '').trim().toLowerCase() === 'abdourahmanebathily1@gmail.com' && (
           <div className="bg-gradient-to-r from-amber-500 via-amber-600 to-amber-700 text-white px-4 sm:px-6 py-2.5 text-xs shadow-md border-b border-amber-800 flex flex-wrap items-center justify-between gap-3 sticky top-16 z-20 animate-in fade-in">
             <div className="flex items-center gap-2.5">
               <span className="w-6 h-6 rounded-lg bg-black/20 flex items-center justify-center font-bold text-sm shadow-xs shrink-0">
@@ -386,7 +387,7 @@ const AppContent: React.FC = () => {
       />
 
       {/* Console Super Admin SaaS Plateforme (Strictement réservé au Super Admin) */}
-      {isSuperAdminViewOpen && isSuperAdmin && (
+      {isSuperAdminViewOpen && isSuperAdmin && (currentUser?.email || '').trim().toLowerCase() === 'abdourahmanebathily1@gmail.com' && (
         <SuperAdminDashboard onClose={() => setIsSuperAdminViewOpen(false)} />
       )}
 

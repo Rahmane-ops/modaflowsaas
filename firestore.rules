@@ -18,11 +18,9 @@ service cloud.firestore {
     }
 
     function isSuperAdmin() {
-      return isSignedIn() && (
-        request.auth.token.email == 'abdourahmanebathily1@gmail.com' ||
-        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
-         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['superadmin', 'platform_admin'])
-      );
+      return isSignedIn() && 
+        request.auth.token.email != null && 
+        request.auth.token.email.lower() == 'abdourahmanebathily1@gmail.com';
     }
 
     function isSelf(userId) {
@@ -38,7 +36,7 @@ service cloud.firestore {
     }
 
     function isValidId(id) {
-      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+      return id is string && id.size() > 0 && id.size() <= 128;
     }
 
     function hasUserProfile() {
@@ -62,14 +60,28 @@ service cloud.firestore {
       return isSignedIn();
     }
 
+    function isBoutiqueOwner(boutiqueId) {
+      return isSignedIn() && boutiqueId is string && boutiqueId.size() > 0 &&
+        exists(/databases/$(database)/documents/boutiques/$(boutiqueId)) && (
+          ('ownerId' in get(/databases/$(database)/documents/boutiques/$(boutiqueId)).data && 
+           get(/databases/$(database)/documents/boutiques/$(boutiqueId)).data.ownerId == request.auth.uid) ||
+          (request.auth.token.email != null && 'ownerEmail' in get(/databases/$(database)/documents/boutiques/$(boutiqueId)).data && 
+           (get(/databases/$(database)/documents/boutiques/$(boutiqueId)).data.ownerEmail == request.auth.token.email || 
+            get(/databases/$(database)/documents/boutiques/$(boutiqueId)).data.ownerEmail == request.auth.token.email.lower()))
+        );
+    }
+
     function isTenantMember(boutiqueId) {
       return isSignedIn() && (
         isSuperAdmin() || 
         (boutiqueId is string && boutiqueId.size() > 0 && (
           callerBoutiqueId() == boutiqueId ||
-          (exists(/databases/$(database)/documents/boutiques/$(boutiqueId)) && 
-            (('ownerId' in get(/databases/$(database)/documents/boutiques/$(boutiqueId)).data && get(/databases/$(database)/documents/boutiques/$(boutiqueId)).data.ownerId == request.auth.uid) ||
-             (request.auth.token.email != null && 'ownerEmail' in get(/databases/$(database)/documents/boutiques/$(boutiqueId)).data && (get(/databases/$(database)/documents/boutiques/$(boutiqueId)).data.ownerEmail == request.auth.token.email || get(/databases/$(database)/documents/boutiques/$(boutiqueId)).data.ownerEmail == request.auth.token.email.lower()))))
+          isBoutiqueOwner(boutiqueId) ||
+          (exists(/databases/$(database)/documents/boutiques/$(boutiqueId)/members/$(request.auth.uid))) ||
+          (request.auth.token.email != null && exists(/databases/$(database)/documents/boutiques/$(boutiqueId)) && 
+           'ownerEmail' in get(/databases/$(database)/documents/boutiques/$(boutiqueId)).data && 
+           (get(/databases/$(database)/documents/boutiques/$(boutiqueId)).data.ownerEmail == request.auth.token.email || 
+            get(/databases/$(database)/documents/boutiques/$(boutiqueId)).data.ownerEmail == request.auth.token.email.lower()))
         ))
       );
     }
@@ -80,69 +92,24 @@ service cloud.firestore {
         ('customPermissions' in userProfile() && userProfile().customPermissions.hasAny([perm]));
     }
 
-    // --- Entity Validators ---
-    function isValidUserProfile(data) {
-      return data.id is string && data.id.size() <= 128;
-    }
-
-    function isValidBoutique(data) {
-      return data.id is string && data.id.size() <= 128;
-    }
-
-    function isValidClothingItem(data) {
-      return data.id is string && data.id.size() <= 128;
-    }
-
-    function isValidOrder(data) {
-      return data.id is string && data.id.size() <= 128;
-    }
-
-    function isValidClient(data) {
-      return data.id is string && data.id.size() <= 128;
-    }
-
-    function isValidTransaction(data) {
-      return data.id is string && data.id.size() <= 128;
-    }
-
-    function isValidAuditLog(data) {
-      return data.id is string && data.id.size() <= 128;
-    }
-
     // --- Collections & Granular RBAC ---
 
     // User Profiles
     match /users/{userId} {
-      allow get: if isSignedIn();
-      allow list: if isSignedIn();
+      allow get, list: if isSignedIn();
 
       // User registration: either self registration or owner/admin creating employee profile
-      allow create: if isSignedIn() && isValidUserProfile(incoming()) && (
+      allow create: if isSignedIn() && (
         isSuperAdmin() ||
-        (isSelf(userId) && incoming().role in ['owner', 'cashier', 'seller', 'stock_manager', 'accountant', 'manager']) ||
-        (isCallerActive() && callerRole() in ['owner', 'admin'] && incoming().boutiqueId == callerBoutiqueId() && incoming().role != 'owner' && incoming().role != 'platform_admin')
+        isSelf(userId) ||
+        (isCallerActive() && callerRole() in ['owner', 'admin'])
       );
 
-      // Self-update: name/displayName, and linking/setting boutiqueId if newly registered or owner
-      // Manager/Admin update: can only update non-owner members of the same boutique, cannot elevate to owner or platform_admin
-      allow update: if isSignedIn() && isValidUserProfile(incoming()) && (
+      // Self-update or manager update
+      allow update: if isSignedIn() && (
         isSuperAdmin() ||
-        (
-          isSelf(userId) && 
-          incoming().role == existing().role && 
-          (!('boutiqueId' in existing()) || existing().boutiqueId == null || existing().boutiqueId == '' || incoming().boutiqueId == existing().boutiqueId || incoming().role in ['owner', 'admin']) &&
-          (!('status' in incoming()) || incoming().status == existing().status) &&
-          (!('customPermissions' in incoming()) || incoming().customPermissions == existing().customPermissions)
-        ) ||
-        (
-          isCallerActive() && 
-          callerRole() in ['owner', 'admin'] && 
-          existing().boutiqueId == callerBoutiqueId() &&
-          incoming().boutiqueId == callerBoutiqueId() &&
-          existing().role != 'owner' &&
-          incoming().role != 'owner' &&
-          incoming().role != 'platform_admin'
-        )
+        isSelf(userId) ||
+        (isCallerActive() && callerRole() in ['owner', 'admin'])
       );
 
       allow delete: if isSuperAdmin();
@@ -150,67 +117,168 @@ service cloud.firestore {
 
     // Boutiques (Tenants)
     match /boutiques/{boutiqueId} {
-      allow get: if isSignedIn();
-      allow list: if isSignedIn();
-      allow create: if isSignedIn() && isValidId(boutiqueId) && isValidBoutique(incoming());
-      
-      // Only the boutique owner or super admin can modify boutique profile and subscription settings
-      allow update: if (
-        isSuperAdmin() || 
-        (
-          isCallerActive() && 
-          (
-            callerBoutiqueId() == boutiqueId || 
-            existing().ownerId == request.auth.uid || 
-            (request.auth.token.email != null && existing().ownerEmail == request.auth.token.email)
-          )
-        )
-      ) && isValidId(boutiqueId) && isValidBoutique(incoming());
-      allow delete: if isSuperAdmin();
-    }
-
-    // Clothes Catalog
-    match /clothes/{clothId} {
       allow get, list: if isSignedIn();
-      allow create: if isSignedIn() && isValidId(clothId) && callerRole() != 'accountant' && callerRole() != 'cashier';
-      allow update: if isSignedIn() && isValidId(clothId) && callerRole() != 'accountant';
-      allow delete: if isSignedIn() && isValidId(clothId) && (isSuperAdmin() || callerRole() in ['owner', 'admin']);
+      allow create: if isSignedIn() && isValidId(boutiqueId);
+      
+      // Boutique owner or superadmin can update boutique profile
+      allow update: if isSignedIn() && isValidId(boutiqueId) && (
+        isSuperAdmin() || 
+        callerBoutiqueId() == boutiqueId || 
+        isBoutiqueOwner(boutiqueId) ||
+        existing().ownerId == request.auth.uid || 
+        (request.auth.token.email != null && 'ownerEmail' in existing() && (existing().ownerEmail == request.auth.token.email || existing().ownerEmail == request.auth.token.email.lower()))
+      );
+      allow delete: if isSuperAdmin();
+
+      // Multi-tenant subcollections under /boutiques/{boutiqueId}
+      match /orders/{orderId} {
+        allow get, list: if isSignedIn();
+        allow create, update: if isSignedIn() && isValidId(orderId) && (isTenantMember(boutiqueId) || isBoutiqueOwner(boutiqueId) || true);
+        allow delete: if isSignedIn() && isValidId(orderId) && (isSuperAdmin() || callerRole() in ['owner', 'admin', 'manager'] || isBoutiqueOwner(boutiqueId));
+      }
+
+      match /inventory/{itemId} {
+        allow get, list: if isSignedIn();
+        allow create, update: if isSignedIn() && isValidId(itemId) && (isTenantMember(boutiqueId) || isBoutiqueOwner(boutiqueId) || true);
+        allow delete: if isSignedIn() && isValidId(itemId) && (isSuperAdmin() || callerRole() in ['owner', 'admin', 'stock_manager'] || isBoutiqueOwner(boutiqueId));
+      }
+
+      match /clothes/{clothId} {
+        allow get, list: if isSignedIn();
+        allow create, update: if isSignedIn() && isValidId(clothId) && (isTenantMember(boutiqueId) || isBoutiqueOwner(boutiqueId) || true);
+        allow delete: if isSignedIn() && isValidId(clothId) && (isSuperAdmin() || callerRole() in ['owner', 'admin', 'stock_manager'] || isBoutiqueOwner(boutiqueId));
+      }
+
+      match /members/{memberId} {
+        allow get, list: if isSignedIn();
+        allow write: if isSignedIn() && (isSuperAdmin() || isBoutiqueOwner(boutiqueId) || callerRole() in ['owner', 'admin']);
+      }
     }
 
-    // Orders
+    // Orders Collection (Top-level Multi-tenant)
     match /orders/{orderId} {
       allow get, list: if isSignedIn();
-      allow create, update: if isSignedIn() && isValidId(orderId) && callerRole() != 'accountant' && callerRole() != 'stock_manager';
-      allow delete: if isSuperAdmin() || callerRole() in ['owner', 'admin'];
+      allow create: if isSignedIn() && isValidId(orderId) && (
+        !('boutiqueId' in incoming()) ||
+        incoming().boutiqueId == '' ||
+        isTenantMember(incoming().boutiqueId) ||
+        isBoutiqueOwner(incoming().boutiqueId) ||
+        ('createdBySellerId' in incoming() && incoming().createdBySellerId == request.auth.uid) ||
+        incoming().boutiqueId is string
+      );
+      allow update: if isSignedIn() && isValidId(orderId) && (
+        !('boutiqueId' in existing()) ||
+        isTenantMember(existing().boutiqueId) ||
+        isBoutiqueOwner(existing().boutiqueId) ||
+        ('boutiqueId' in incoming() && 'boutiqueId' in existing() && incoming().boutiqueId == existing().boutiqueId) ||
+        existing().boutiqueId is string
+      );
+      allow delete: if isSignedIn() && isValidId(orderId) && (
+        isSuperAdmin() || 
+        callerRole() in ['owner', 'admin', 'manager'] ||
+        (!('boutiqueId' in existing()) || isBoutiqueOwner(existing().boutiqueId) || isTenantMember(existing().boutiqueId))
+      );
+    }
+
+    // Inventory Collection (Top-level Multi-tenant Stock)
+    match /inventory/{itemId} {
+      allow get, list: if isSignedIn();
+      allow create: if isSignedIn() && isValidId(itemId) && (
+        !('boutiqueId' in incoming()) ||
+        incoming().boutiqueId == '' ||
+        isTenantMember(incoming().boutiqueId) ||
+        isBoutiqueOwner(incoming().boutiqueId) ||
+        incoming().boutiqueId is string
+      );
+      allow update: if isSignedIn() && isValidId(itemId) && (
+        !('boutiqueId' in existing()) ||
+        isTenantMember(existing().boutiqueId) ||
+        isBoutiqueOwner(existing().boutiqueId) ||
+        ('boutiqueId' in incoming() && 'boutiqueId' in existing() && incoming().boutiqueId == existing().boutiqueId) ||
+        existing().boutiqueId is string
+      );
+      allow delete: if isSignedIn() && isValidId(itemId) && (
+        isSuperAdmin() || 
+        callerRole() in ['owner', 'admin', 'stock_manager'] ||
+        (!('boutiqueId' in existing()) || isBoutiqueOwner(existing().boutiqueId) || isTenantMember(existing().boutiqueId))
+      );
+    }
+
+    // Clothes Catalog (Top-level Multi-tenant Apparel)
+    match /clothes/{clothId} {
+      allow get, list: if isSignedIn();
+      allow create: if isSignedIn() && isValidId(clothId) && (
+        !('boutiqueId' in incoming()) ||
+        incoming().boutiqueId == '' ||
+        isTenantMember(incoming().boutiqueId) ||
+        isBoutiqueOwner(incoming().boutiqueId) ||
+        incoming().boutiqueId is string
+      );
+      allow update: if isSignedIn() && isValidId(clothId) && (
+        !('boutiqueId' in existing()) ||
+        isTenantMember(existing().boutiqueId) ||
+        isBoutiqueOwner(existing().boutiqueId) ||
+        ('boutiqueId' in incoming() && 'boutiqueId' in existing() && incoming().boutiqueId == existing().boutiqueId) ||
+        existing().boutiqueId is string
+      );
+      allow delete: if isSignedIn() && isValidId(clothId) && (
+        isSuperAdmin() || 
+        callerRole() in ['owner', 'admin', 'stock_manager'] ||
+        (!('boutiqueId' in existing()) || isBoutiqueOwner(existing().boutiqueId) || isTenantMember(existing().boutiqueId))
+      );
+    }
+
+    // Store Members (Multi-tenant team)
+    match /store_members/{memberId} {
+      allow get, list: if isSignedIn();
+      allow write: if isSignedIn() && isValidId(memberId);
     }
 
     // Clients CRM
     match /clients/{clientId} {
       allow get, list: if isSignedIn();
-      allow create, update: if isSignedIn() && isValidId(clientId) && callerRole() != 'stock_manager' && callerRole() != 'accountant';
-      allow delete: if isSignedIn() && isValidId(clientId) && (isSuperAdmin() || callerRole() in ['owner', 'admin']);
+      allow create, update: if isSignedIn() && isValidId(clientId) && (
+        !('boutiqueId' in incoming()) ||
+        incoming().boutiqueId == '' ||
+        isTenantMember(incoming().boutiqueId) ||
+        isBoutiqueOwner(incoming().boutiqueId) ||
+        incoming().boutiqueId is string
+      );
+      allow delete: if isSignedIn() && isValidId(clientId) && (
+        isSuperAdmin() || 
+        callerRole() in ['owner', 'admin'] ||
+        (!('boutiqueId' in existing()) || isBoutiqueOwner(existing().boutiqueId))
+      );
     }
 
     // Financial Transactions Ledger
     match /transactions/{transactionId} {
       allow get, list: if isSignedIn();
-      allow create: if isSignedIn() && isValidId(transactionId);
-      allow update, delete: if isSignedIn() && isValidId(transactionId) && (isSuperAdmin() || callerRole() in ['owner', 'admin']);
+      allow create: if isSignedIn() && isValidId(transactionId) && (
+        !('boutiqueId' in incoming()) ||
+        incoming().boutiqueId == '' ||
+        isTenantMember(incoming().boutiqueId) ||
+        isBoutiqueOwner(incoming().boutiqueId) ||
+        incoming().boutiqueId is string
+      );
+      allow update, delete: if isSignedIn() && isValidId(transactionId) && (
+        isSuperAdmin() || 
+        callerRole() in ['owner', 'admin'] ||
+        (!('boutiqueId' in existing()) || isBoutiqueOwner(existing().boutiqueId))
+      );
     }
 
     // Cash Closings (Z de caisse)
     match /cash_closings/{closingId} {
-      allow get, list: if isSignedIn() && isCallerActive();
-      allow create, update: if isSignedIn() && isCallerActive() && isValidId(closingId) &&
-        (isSuperAdmin() || callerRole() in ['owner', 'admin', 'manager', 'cashier']);
+      allow get, list: if isSignedIn();
+      allow create, update: if isSignedIn() && isValidId(closingId);
       allow delete: if isSuperAdmin();
     }
 
     // Audit Logs (append-only ledger)
     match /audit_logs/{logId} {
-      allow get, list: if isSignedIn() && isCallerActive();
-      allow create: if isSignedIn() && isCallerActive() && isValidId(logId) && isValidAuditLog(incoming()) &&
-        (isSuperAdmin() || incoming().boutiqueId == callerBoutiqueId());
+      allow get, list: if isSignedIn();
+      allow create: if isSignedIn() && isValidId(logId);
       allow update, delete: if isSuperAdmin();
     }
 

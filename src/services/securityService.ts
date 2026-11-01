@@ -481,23 +481,10 @@ export function isPlatformSuperAdmin(
   if ((user as any).id === 'user-owner') return false;
 
   const email = (user.email || '').trim().toLowerCase();
-  const isSovereignEmail = email === 'abdourahmanebathily1@gmail.com';
-
-  // Si c'est un propriétaire de boutique ordinaire (owner), refus strict
-  if (user.role === 'owner' && !isSovereignEmail) {
-    return false;
-  }
-
-  // Si c'est un employé ordinaire de boutique (admin, manager, cashier, etc.), refus strict
-  if (['admin', 'manager', 'cashier', 'seller', 'stock_manager', 'accountant', 'delivery'].includes(user.role as string) && !isSovereignEmail) {
-    return false;
-  }
-
-  return (
-    isSovereignEmail ||
-    user.role === 'superadmin' ||
-    user.role === 'platform_admin'
-  );
+  // RÈGLE ABSOLUE DE SÉCURITÉ : Seul le propriétaire souverain abdourahmanebathily1@gmail.com
+  // est autorisé à être Super Admin de la plateforme. Aucun autre utilisateur, commerçant ou employé
+  // ne peut accéder à la console Super Admin ou y être redirigé.
+  return email === 'abdourahmanebathily1@gmail.com';
 }
 
 /**
